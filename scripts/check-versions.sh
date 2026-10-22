@@ -34,6 +34,10 @@ for dockerfile in adapters/*/Dockerfile; do
     fi
     sha=$(sed -nE 's/^ARG UPSTREAM_SHA=(.+)$/\1/p' "${dockerfile}" | sed -n 1p)
     [[ -n "${sha}" ]] && need "${adapter} revision" "${sha}"
+    # Further pins of the same adapter, such as a second upstream repository.
+    while read -r name pin; do
+        need "${adapter} ${name}" "${pin}"
+    done < <(sed -nE 's/^ARG ([A-Z0-9]+_(SHA|VERSION))=(.+)$/\1 \3/p' "${dockerfile}" | grep -vE '^UPSTREAM_')
     while read -r name digest; do
         need "${adapter} ${name}" "${digest}"
     done < <(sed -nE 's/^ARG ([A-Z0-9_]+_DIGEST)=(sha256:[0-9a-f]{64})$/\1 \2/p' "${dockerfile}")

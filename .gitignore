@@ -10,3 +10,6 @@ reports/
 .vscode/
 .idea/
 .DS_Store
+
+# Throwaway PKI of make pki
+tls/

@@ -48,3 +48,24 @@ jobs:
           if grep -rInE 'otfabric/go-|go-ieee20305|ieee20305ctl' adapters fixtures schemas scripts tests Makefile compose.yaml; then
             echo "::error::consumer-specific reference found"; exit 1
           fi
+
+  selftest:
+    name: Images and self-tests
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the adapter images
+        run: make images
+      - name: Container-contract smoke tests
+        run: REPORT_DIR=reports make smoke
+      - name: Cross-stack tests
+        run: REPORT_DIR=reports make interop
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: selftest-reports
+          path: reports/
+          if-no-files-found: ignore

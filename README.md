@@ -16,7 +16,7 @@ against real implementation diversity without owning any of it.
 | `epri` | [EPRI IEEE 2030.5 Client](https://github.com/epri-dev/IEEE-2030.5-Client) | C | client | BSD-3-Clause | planned |
 | `envoy` | [ANU Envoy](https://github.com/bsgip/envoy) | Python | server | MIT | planned |
 | `py20305` | [DER Security py20305](https://github.com/DERSecurity/py20305) | Python | client | Apache-2.0 | planned |
-| `gridappsd` | [GridAPPS-D](https://github.com/GRIDAPPSD/ieee-2030_5-server-go) | Go | both | BSD-2-Clause | planned |
+| `gridappsd` | [GridAPPS-D server](https://github.com/GRIDAPPSD/ieee-2030_5-server-go) and [client](https://github.com/GRIDAPPSD/ieee-2030_5-client-go) | Go | both | Battelle BSD | implemented ([README](adapters/gridappsd/README.md)) |
 
 ## Quick start
 
@@ -25,7 +25,12 @@ make ci          # validate, lint, build all images and run self-tests
 make images      # build the local images
 make smoke       # container-contract smoke tests
 make interop     # cross-stack tests (every client x every server)
+make pki         # throwaway TLS material in ./tls for local work
+docker compose up -d --wait   # the reference servers on 127.0.0.1
 ```
+
+Everything runs with mutual TLS. The tests generate certificates at run time;
+none are committed or baked into the images.
 
 ## Documentation
 
@@ -33,7 +38,8 @@ make interop     # cross-stack tests (every client x every server)
   every image implements
 - [docs/CAPABILITIES.md](docs/CAPABILITIES.md) -- what capabilities documents
   describe
-- [docs/FIXTURES.md](docs/FIXTURES.md) -- fixture format documentation
+- [docs/FIXTURES.md](docs/FIXTURES.md) -- what fixtures seed and send
+- [tests/cases.tsv](tests/cases.tsv) -- the cross-stack test ids
 - [REQUIREMENTS.md](REQUIREMENTS.md) -- what this repository must do
 - [PLAN.md](PLAN.md) -- order of work
 

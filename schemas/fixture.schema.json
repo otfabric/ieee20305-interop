@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/otfabric/ieee20305-interop/schemas/fixture.schema.json",
+  "title": "ieee20305-interop fixture",
+  "description": "What a server is seeded with and what a client reports, for one scenario. See docs/FIXTURES.md.",
+  "type": "object",
+  "required": ["schemaVersion", "name", "description", "device", "derPrograms", "report"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {"const": "1.0"},
+    "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+    "description": {"type": "string", "minLength": 1},
+    "device": {
+      "type": "object",
+      "description": "The device of the scenario. Its LFDI and SFDI are those of the device certificate a test generates for the serial.",
+      "required": ["serial", "pin", "deviceCategory"],
+      "additionalProperties": false,
+      "properties": {
+        "serial": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", "description": "Serial number in the HardwareModuleName of the device certificate"},
+        "pin": {"type": "integer", "minimum": 0, "maximum": 999999, "description": "Registration PIN (PINType): five digits and a check digit"},
+        "deviceCategory": {"$ref": "#/$defs/hex32", "description": "DeviceCategoryType bitmap"}
+      }
+    },
+    "derPrograms": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/derProgram"}
+    },
+    "report": {
+      "type": "object",
+      "description": "The metering a client reports: a MirrorUsagePoint and its MirrorMeterReadings.",
+      "required": ["mirrorUsagePoint", "meterReadings"],
+      "additionalProperties": false,
+      "properties": {
+        "mirrorUsagePoint": {
+          "type": "object",
+          "required": ["mRID", "description", "roleFlags", "serviceCategoryKind", "status"],
+          "additionalProperties": false,
+          "properties": {
+            "mRID": {"$ref": "#/$defs/mrid"},
+            "description": {"$ref": "#/$defs/string32"},
+            "roleFlags": {"type": "string", "pattern": "^[0-9A-F]{4}$", "description": "RoleFlagsType bitmap"},
+            "serviceCategoryKind": {"type": "integer", "minimum": 0, "maximum": 255},
+            "status": {"type": "integer", "minimum": 0, "maximum": 255}
+          }
+        },
+        "meterReadings": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["mRID", "description", "readingType", "value"],
+            "additionalProperties": false,
+            "properties": {
+              "mRID": {"$ref": "#/$defs/mrid"},
+              "description": {"$ref": "#/$defs/string32"},
+              "readingType": {
+                "type": "object",
+                "description": "ReadingType elements, by their IEEE 2030.5 names.",
+                "required": ["commodity", "kind", "uom"],
+                "additionalProperties": false,
+                "properties": {
+                  "accumulationBehaviour": {"$ref": "#/$defs/uint8"},
+                  "commodity": {"$ref": "#/$defs/uint8"},
+                  "dataQualifier": {"$ref": "#/$defs/uint8"},
+                  "flowDirection": {"$ref": "#/$defs/uint8"},
+                  "kind": {"$ref": "#/$defs/uint8"},
+                  "phase": {"$ref": "#/$defs/uint8"},
+                  "powerOfTenMultiplier": {"type": "integer", "minimum": -9, "maximum": 9},
+                  "uom": {"$ref": "#/$defs/uint8"}
+                }
+              },
+              "value": {"type": "integer", "minimum": -140737488355328, "maximum": 140737488355328}
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "mrid": {"type": "string", "pattern": "^[0-9A-F]{32}$", "description": "mRIDType: 128 bits as upper-case hexadecimal"},
+    "hex32": {"type": "string", "pattern": "^[0-9A-F]{8}$"},
+    "string32": {"type": "string", "maxLength": 32},
+    "uint8": {"type": "integer", "minimum": 0, "maximum": 255},
+    "controlBase": {
+      "type": "object",
+      "description": "DERControlBase elements, by their IEEE 2030.5 names and value types.",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "opModConnect": {"type": "boolean"},
+        "opModEnergize": {"type": "boolean"},
+        "opModMaxLimW": {"type": "integer", "minimum": 0, "maximum": 10000, "description": "PerCent: hundredths of a percent of the maximum active power"},
+        "opModFixedW": {"type": "integer", "minimum": -10000, "maximum": 10000, "description": "SignedPerCent: hundredths of a percent of the maximum active power"}
+      }
+    },
+    "derProgram": {
+      "type": "object",
+      "required": ["mRID", "description", "primacy", "controls"],
+      "additionalProperties": false,
+      "properties": {
+        "mRID": {"$ref": "#/$defs/mrid"},
+        "description": {"$ref": "#/$defs/string32"},
+        "primacy": {"$ref": "#/$defs/uint8"},
+        "defaultControl": {
+          "type": "object",
+          "required": ["mRID", "description", "base"],
+          "additionalProperties": false,
+          "properties": {
+            "mRID": {"$ref": "#/$defs/mrid"},
+            "description": {"$ref": "#/$defs/string32"},
+            "base": {"$ref": "#/$defs/controlBase"}
+          }
+        },
+        "controls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A DERControl. A server starts it when it starts; duration is in seconds.",
+            "required": ["mRID", "description", "base", "duration"],
+            "additionalProperties": false,
+            "properties": {
+              "mRID": {"$ref": "#/$defs/mrid"},
+              "description": {"$ref": "#/$defs/string32"},
+              "base": {"$ref": "#/$defs/controlBase"},
+              "duration": {"type": "integer", "minimum": 1, "maximum": 4294967295}
+            }
+          }
+        }
+      }
+    }
+  }
+}

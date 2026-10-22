@@ -134,30 +134,38 @@ def within($want; $got):
 
 # ---- transport security: a throwaway PKI, generated at test time ----
 # Nothing of it is committed or baked into an image (REQUIREMENTS.md R7.3).
-# IEEE 2030.5 requires mutual TLS with device certificates. The LFDI (Long
-# Form Device Identifier) is the SHA-256 fingerprint of the device certificate.
+# IEEE 2030.5 requires mutual TLS with ECDSA P-256 certificates. The
+# certificates follow the IEEE 2030.5 and CSIP certificate profile as far as
+# the reference stacks check it:
+#   - device certificates carry a critical subjectAltName holding only an
+#     RFC 4108 HardwareModuleName, and the IEEE 2030.5 policy OIDs;
+#   - server certificates carry a critical subjectAltName with their host
+#     names, a critical keyUsage, and both serverAuth and clientAuth (some
+#     clients verify the server with the clientAuth usage, as CSIP servers
+#     carry both).
 
-# new_key <file> <rsa|ec>: an unencrypted PKCS #8 PEM key, RSA 2048 or ECDSA P-256.
+# IEEE 2030.5 certificate policy OIDs (IEEE 2030.5 section 6.11.8.4): device
+# certificate (generic), test certificate.
+IEEE20305_POLICY_DEVICE="1.3.6.1.4.1.40732.1.1"
+IEEE20305_POLICY_TEST="1.3.6.1.4.1.40732.2.2"
+
+# new_key <file>: an unencrypted PKCS #8 PEM key on P-256.
 new_key() {
-    if [[ "$2" == ec ]]; then
-        openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$1" 2>/dev/null
-    else
-        openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$1" 2>/dev/null
-    fi
+    openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out "$1" 2>/dev/null
 }
 
-# new_ca <dir> <rsa|ec> <name>: <dir>/ca.key and the self-signed <dir>/ca.crt.
+# new_ca <dir> <name>: <dir>/ca.key and the self-signed <dir>/ca.crt.
 new_ca() {
     local dir="$1"
     mkdir -p "${dir}"
-    new_key "${dir}/ca.key" "$2" || return 1
+    new_key "${dir}/ca.key" || return 1
     cat > "${dir}/ca.cnf" <<CNF
 [req]
 distinguished_name = dn
 prompt = no
 x509_extensions = ca
 [dn]
-CN = $3
+CN = $2
 [ca]
 basicConstraints = critical, CA:TRUE
 keyUsage = critical, keyCertSign, cRLSign
@@ -166,68 +174,103 @@ CNF
     openssl req -x509 -new -key "${dir}/ca.key" -config "${dir}/ca.cnf" -days 2 -sha256 -out "${dir}/ca.crt" 2>/dev/null
 }
 
-# new_leaf <ca dir> <out prefix> <rsa|ec> <server|client> <common name> [<subject alternative names>...]
-# writes <out prefix>.crt and <out prefix>.key, signed by the CA of <ca dir>.
-new_leaf() {
-    local ca="$1" out="$2" type="$3" role="$4" cn="$5"; shift 5
-    local usage="digitalSignature" san="" name
-    [[ "${type}" == rsa ]] && usage="digitalSignature, keyEncipherment"
-    for name in "$@"; do
-        if [[ "${name}" =~ ^[0-9.]+$ ]]; then san="${san:+${san}, }IP:${name}"; else san="${san:+${san}, }DNS:${name}"; fi
-    done
-    new_key "${out}.key" "${type}" || return 1
-    openssl req -new -key "${out}.key" -subj "/CN=${cn}" -out "${out}.csr" 2>/dev/null || return 1
-    {
-        echo "basicConstraints = critical, CA:FALSE"
-        echo "keyUsage = critical, ${usage}"
-        echo "extendedKeyUsage = $([[ "${role}" == server ]] && echo serverAuth || echo clientAuth)"
-        echo "subjectKeyIdentifier = hash"
-        echo "authorityKeyIdentifier = keyid"
-        [[ -n "${san}" ]] && echo "subjectAltName = ${san}"
-    } > "${out}.ext"
-    local status=0
+# sign <ca dir> <out prefix> <subject> <extensions file>: signs a new key's
+# request with the CA into <out prefix>.crt, with <out prefix>.key.
+sign() {
+    local ca="$1" out="$2" subject="$3" ext="$4" status=0
+    new_key "${out}.key" || return 1
+    openssl req -new -key "${out}.key" -subj "${subject}" -out "${out}.csr" 2>/dev/null || return 1
     openssl x509 -req -in "${out}.csr" -CA "${ca}/ca.crt" -CAkey "${ca}/ca.key" -CAcreateserial \
-        -days 2 -sha256 -extfile "${out}.ext" -out "${out}.crt" 2>"${out}.err" || status=$?
-    [[ "${status}" == 0 ]] || { log "openssl x509: $(cat "${out}.err")"; }
-    rm -f "${out}.csr" "${out}.ext" "${out}.err"
+        -days 2 -sha256 -extfile "${ext}" -extensions leaf -out "${out}.crt" 2>"${out}.err" || status=$?
+    [[ "${status}" == 0 ]] || log "openssl x509: $(cat "${out}.err")"
+    rm -f "${out}.csr" "${out}.err" "${ext}"
     return "${status}"
 }
 
-# lfdi_of <cert file>: the LFDI (Long Form Device Identifier) is the hex-encoded
-# SHA-256 fingerprint of the DER-encoded certificate (IEEE 2030.5 section 6.11.5).
+# new_server <ca dir> <out prefix> <host names or IP addresses...>
+new_server() {
+    local ca="$1" out="$2" name san=""; shift 2
+    for name in "$@"; do
+        if [[ "${name}" =~ ^[0-9.]+$ ]]; then san="${san:+${san}, }IP:${name}"; else san="${san:+${san}, }DNS:${name}"; fi
+    done
+    cat > "${out}.ext" <<EXT
+[leaf]
+basicConstraints = critical, CA:FALSE
+keyUsage = critical, digitalSignature, keyAgreement
+extendedKeyUsage = serverAuth, clientAuth
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid
+subjectAltName = critical, ${san}
+EXT
+    sign "${ca}" "${out}" "/CN=$1" "${out}.ext"
+}
+
+# new_device <ca dir> <out prefix> <serial number>: a device certificate
+# whose HardwareModuleName carries the serial number.
+new_device() {
+    local ca="$1" out="$2" serial="$3" hex
+    hex=$(printf '%s' "${serial}" | od -An -tx1 | tr -d ' \n')
+    cat > "${out}.ext" <<EXT
+[leaf]
+basicConstraints = critical, CA:FALSE
+keyUsage = critical, digitalSignature, keyAgreement
+extendedKeyUsage = clientAuth
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid
+certificatePolicies = ${IEEE20305_POLICY_DEVICE}, ${IEEE20305_POLICY_TEST}
+subjectAltName = critical, otherName:1.3.6.1.5.5.7.8.4;SEQUENCE:hmn
+[hmn]
+hwType = OID:${IEEE20305_POLICY_DEVICE}
+hwSerialNum = FORMAT:HEX,OCTETSTRING:${hex}
+EXT
+    sign "${ca}" "${out}" "/CN=${serial}" "${out}.ext"
+}
+
+# lfdi_of <cert file>: the LFDI (Long Form Device Identifier), the leftmost
+# 160 bits of the SHA-256 fingerprint of the DER certificate, as 40
+# upper-case hexadecimal digits (IEEE 2030.5 section 6.3.4).
 lfdi_of() {
-    openssl x509 -in "$1" -outform DER 2>/dev/null | openssl dgst -sha256 -hex 2>/dev/null | awk '{print $NF}'
+    openssl x509 -in "$1" -outform DER 2>/dev/null | openssl dgst -sha256 -hex 2>/dev/null \
+        | awk '{print toupper(substr($NF, 1, 40))}'
 }
 
-# sfdi_of <cert file>: the SFDI (Short Form Device Identifier) is the leftmost
-# 36 bits of the certificate fingerprint, rendered as a decimal (IEEE 2030.5 section 6.11.6).
+# sfdi_of <cert file>: the SFDI (Short Form Device Identifier), the leftmost
+# 36 bits of the fingerprint as a decimal number followed by a check digit
+# that makes the sum of all digits a multiple of 10 (IEEE 2030.5 section 6.3.3).
 sfdi_of() {
-    local hex
+    local hex value sum=0 i
     hex=$(lfdi_of "$1" | cut -c1-9)
-    printf '%d\n' "0x${hex}" 2>/dev/null | cut -c1-11
+    [[ -n "${hex}" ]] || return 1
+    value=$((16#${hex}))
+    for ((i = 0; i < ${#value}; i++)); do sum=$((sum + ${value:i:1})); done
+    echo "${value}$(( (10 - sum % 10) % 10 ))"
 }
 
-# make_pki <dir> <rsa|ec> <device id> <server host names...>: the --tls-dir
-# directories for IEEE 2030.5 mTLS testing:
-#   server/      server.crt (for every host name given), server.key, ca.crt
-#   client/      ca.crt, client.crt and client.key with CN = <device id>
-#   other-cn/    as client/, with a client certificate for another identity
-#   other-ca/    as client/, with a client certificate from another CA
-#   untrusted/   ca.crt of another CA (the server's certificate does not
-#                verify), and the client's certificate
+# make_pki <dir> <device serial> <server host names...>: the --tls-dir
+# directories for IEEE 2030.5 mutual TLS:
+#   server/          server.crt (for every host name given), server.key,
+#                    ca.crt, and devices/<serial>.crt: the device
+#                    certificates the server provisions
+#   client/          client.crt and client.key of the provisioned device,
+#                    and ca.crt
+#   unprovisioned/   as client/, for a device of the same CA that the server
+#                    has not provisioned
+#   other-ca/        as client/, with a device certificate from another CA
+#   untrusted/       the client's certificate, and the ca.crt of another CA
+#                    (the server's certificate does not verify)
 make_pki() {
-    local dir="$1" type="$2" device="$3"; shift 3
-    local d
+    local dir="$1" serial="$2" d; shift 2
     command -v openssl >/dev/null || { log "missing required tool: openssl"; return 1; }
     mkdir -p "${dir}"
-    new_ca "${dir}/.ca" "${type}" "ieee20305-interop test CA ${RUN_ID}" || return 1
-    new_ca "${dir}/.rogue" "${type}" "ieee20305-interop other CA ${RUN_ID}" || return 1
-    for d in server client other-cn other-ca untrusted; do mkdir -p "${dir}/${d}"; done
-    new_leaf "${dir}/.ca" "${dir}/server/server" "${type}" server "$1" "$@" || return 1
-    new_leaf "${dir}/.ca" "${dir}/client/client" "${type}" client "${device}" || return 1
-    new_leaf "${dir}/.ca" "${dir}/other-cn/client" "${type}" client "NOT-${device}" || return 1
-    new_leaf "${dir}/.rogue" "${dir}/other-ca/client" "${type}" client "${device}" || return 1
-    for d in server client other-cn other-ca; do cp "${dir}/.ca/ca.crt" "${dir}/${d}/ca.crt"; done
+    new_ca "${dir}/.ca" "ieee20305-interop test CA ${RUN_ID}" || return 1
+    new_ca "${dir}/.rogue" "ieee20305-interop other CA ${RUN_ID}" || return 1
+    for d in server/devices client unprovisioned other-ca untrusted; do mkdir -p "${dir}/${d}"; done
+    new_server "${dir}/.ca" "${dir}/server/server" "$@" || return 1
+    new_device "${dir}/.ca" "${dir}/client/client" "${serial}" || return 1
+    new_device "${dir}/.ca" "${dir}/unprovisioned/client" "unprovisioned-${serial}" || return 1
+    new_device "${dir}/.rogue" "${dir}/other-ca/client" "${serial}" || return 1
+    cp "${dir}/client/client.crt" "${dir}/server/devices/${serial}.crt"
+    for d in server client unprovisioned other-ca; do cp "${dir}/.ca/ca.crt" "${dir}/${d}/ca.crt"; done
     cp "${dir}/.rogue/ca.crt" "${dir}/untrusted/ca.crt"
     cp "${dir}/client/client.crt" "${dir}/client/client.key" "${dir}/untrusted/"
     rm -rf "${dir}/.ca" "${dir}/.rogue"

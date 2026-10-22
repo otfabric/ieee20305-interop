@@ -1,18 +1,23 @@
 # Reference IEEE 2030.5 servers for local work. Ports are published on
-# loopback only: these are test servers with generated mTLS certificates that
+# loopback only: these are test servers with throwaway mTLS certificates that
 # must not be reachable from anywhere else.
 #
+#   make pki                           # throwaway CA, server and device certificates in ./tls
 #   docker compose up -d --wait        # every server, waits for readiness
 #   docker compose down
 #
-# A client connects to https://127.0.0.1:<port>/dcap with the test
-# certificates mounted from fixtures.
+# Each server provisions the device of tls/client (tls/server/devices). A
+# client connects to https://127.0.0.1:<port>/dcap with tls/client/client.crt
+# and client.key, and verifies the server with tls/client/ca.crt. The
+# GridAPPS-D server accepts only the TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 cipher
+# suite.
 #
 # IEEE20305_INTEROP_VERSION selects the image tag (default: dev, the local
-# build).
+# build); IEEE20305_EDITION the IEEE 2030.5 version (default 2018).
 
 x-server: &server
-  command: ["server"]
+  volumes:
+    - ./tls:/tls:ro
   healthcheck:
     test: ["CMD", "test", "-f", "/run/ieee20305-interop/ready"]
     interval: 2s
@@ -23,14 +28,9 @@ x-server: &server
 
 name: ieee20305-interop
 services:
-  envoy:
-    <<: *server
-    image: ghcr.io/otfabric/ieee20305-interop-envoy:${IEEE20305_INTEROP_VERSION:-dev}
-    ports:
-      - "127.0.0.1:8443:443"
-
   gridappsd-server:
     <<: *server
     image: ghcr.io/otfabric/ieee20305-interop-gridappsd:${IEEE20305_INTEROP_VERSION:-dev}
+    command: ["server", "--version", "${IEEE20305_EDITION:-2018}", "--tls-dir", "/tls/server"]
     ports:
       - "127.0.0.1:8444:443"

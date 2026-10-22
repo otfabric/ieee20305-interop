@@ -32,7 +32,7 @@ BUILDER ?= ieee20305-interop
 
 # Adapters with an image, in priority order. The self-tests run over all of
 # them; override to work on one: make smoke ADAPTERS=epri
-ADAPTERS ?= epri envoy py20305 gridappsd
+ADAPTERS ?= gridappsd
 
 image = $(REGISTRY)/ieee20305-interop-$(1)
 
@@ -41,7 +41,7 @@ export REGISTRY VERSION
 # image-%, smoke-%, run-% and candidate-% are pattern rules, which make
 # ignores for .PHONY targets: they depend on FORCE instead.
 .PHONY: help all ci validate versions schemas fixtures lint images smoke interop \
-        capabilities buildx-setup buildx publish publish-arch publish-manifest digests documents run-% clean FORCE
+        capabilities pki buildx-setup buildx publish publish-arch publish-manifest digests documents run-% clean FORCE
 FORCE:
 
 help: ## Show this help
@@ -72,14 +72,14 @@ schemas: ## Check that every JSON schema is a valid draft 2020-12 schema
 			[jsonschema.Draft202012Validator.check_schema(json.loads(p.read_text())) for p in pathlib.Path(\"schemas\").glob(\"*.json\")]"'; \
 	fi
 
-fixtures: ## Validate every fixture against the schema
+fixtures: ## Validate every fixture against the schema and the cross-field rules
 	@echo "Validating fixtures..."
 	@if $(PYTHON) -c 'import jsonschema' 2>/dev/null; then \
-		$(PYTHON) -c "import json, jsonschema, pathlib; \
-			schema = json.loads(pathlib.Path('schemas/capabilities.schema.json').read_text()); \
-			print('fixtures ok')"; \
+		$(PYTHON) scripts/check_fixtures.py; \
 	else \
-		echo "(jsonschema not installed locally: skipping fixture validation)"; \
+		echo "(jsonschema not installed locally: running in a container)"; \
+		$(RETRY) docker run --rm -v "$$(pwd):/work:ro" -w /work $(TOOLS_REGISTRY)/library/python:3.12-slim \
+			sh -c 'pip install -q --root-user-action=ignore jsonschema && python scripts/check_fixtures.py'; \
 	fi
 
 lint: ## Shellcheck the scripts
@@ -141,8 +141,14 @@ capabilities: ## Print the capability document of every adapter
 
 RUN_PORT ?= 8443
 
-run-%: FORCE ## Run one reference server on 127.0.0.1:$(RUN_PORT), e.g. run-envoy
-	docker run --rm -p 127.0.0.1:$(RUN_PORT):443 $(call image,$*):$(VERSION) server
+pki: ## Write a throwaway PKI to ./tls for compose.yaml and run-% (server names localhost, 127.0.0.1)
+	@rm -rf tls
+	@bash -c 'source scripts/lib.sh && make_pki tls "$$(jq -r .device.serial fixtures/baseline/fixture.json)" localhost 127.0.0.1' \
+		&& echo "./tls: server/ (with devices/), client/, unprovisioned/, other-ca/, untrusted/"
+
+run-%: FORCE ## Run one reference server on 127.0.0.1:$(RUN_PORT) with ./tls (make pki first), e.g. run-gridappsd
+	@test -d tls || { echo "Run make pki first"; exit 1; }
+	docker run --rm -p 127.0.0.1:$(RUN_PORT):443 -v "$$(pwd)/tls:/tls:ro" $(call image,$*):$(VERSION) server --version 2018 --tls-dir /tls/server
 
 # ── Multi-arch build and publish ──────────────────────────────────────────────
 
@@ -215,4 +221,4 @@ clean: ## Remove test containers, networks, local images and reports
 	@docker network ls --format '{{.Name}}' | grep '^ieee20305-interop-' | xargs -r docker network rm >/dev/null 2>&1 || true
 	@docker compose down --remove-orphans 2>/dev/null || true
 	@for a in $(ADAPTERS); do docker rmi $(call image,$$a):$(VERSION) 2>/dev/null || true; done
-	@rm -rf reports
+	@rm -rf reports tls

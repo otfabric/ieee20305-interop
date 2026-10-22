@@ -4,8 +4,8 @@
 # scripts/check-versions.sh fails when this file disagrees with them.
 
 interop_version: "0.1.0"
-contract_version: "0.1"        # docs/CONTAINER_CONTRACT.md (draft until 1.0); documents carry schemaVersion "1.0"
-fixture_schema: "1.0"          # fixtures/baseline/fixture.json
+contract_version: "0.2"        # docs/CONTAINER_CONTRACT.md (draft until 1.0); documents carry schemaVersion "1.0"
+fixture_schema: "1.0"          # schemas/fixture.schema.json
 
 protocol:
   name: "IEEE 2030.5"
@@ -26,10 +26,16 @@ implementations:
     independent_engine: true
     roles: [client]
     versions_claimed: ["2018"]
+    candidate: "commit 505ee47d9c3ed43ce63087198d09f77338da627d (2018-07-27; tags v0.2.11, no releases)"
     note: >-
-      EPRI's reference client implementation for IEEE 2030.5. Written in C
-      with mTLS support. Implements the client (EndDevice) role for device
-      registration, DER program discovery and control polling.
+      EPRI's C client (client_test). Unmaintained since 2018. Builds on
+      Debian trixie with OpenSSL 3 using its bash build (build.sh, not
+      CMake) after patching the OpenSSL 1.1.0 check in targets.sh. Offers
+      only TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 through OpenSSL; requires
+      critical subjectAltName and keyUsage in the server certificate;
+      derives the LFDI from the raw certificate file, so it needs DER; takes
+      IP literals only; no subscriptions (commented out); free-text output
+      and exit status 0 on every error.
 
   envoy:
     priority: P0
@@ -43,11 +49,15 @@ implementations:
     roles: [server]
     versions_claimed: ["2018", "2023"]
     profiles_claimed: ["CSIP-AUS"]
+    candidate: "v2.5.0, commit 9d00340b5592f1fdf09dc74bd743fc251da0bfb5 (CSIP-AUS v1.3, envoy_schema 2.7.0; uv.lock with hashes)"
     note: >-
-      ANU/BSGIP Envoy is a Python/FastAPI IEEE 2030.5 server with a focus
-      on the CSIP-AUS profile for Australian DER integration. It serves as
-      the utility server (aggregator) role, managing EndDevice registrations,
-      DER programs and DER controls.
+      ANU/BSGIP Envoy, a Python/FastAPI IEEE 2030.5 server for CSIP-AUS.
+      Needs PostgreSQL (asyncpg, Alembic migrations) and does not terminate
+      TLS: a reverse proxy verifies the client certificate and passes it in
+      x-forwarded-client-cert. One image therefore bundles PostgreSQL,
+      nginx (mutual TLS, which can offer CCM_8 and GCM) and uvicorn.
+      ALLOW_DEVICE_REGISTRATION=true admits device certificates; programs
+      and controls are seeded as site control groups and site controls.
 
   py20305:
     priority: P0
@@ -60,28 +70,40 @@ implementations:
     independent_engine: true
     roles: [client]
     versions_claimed: ["2018", "2023"]
+    candidate: "v0.16.0, commit 79844938eea3d05f5432cdc5f2d07a103e87912b (PyPI py20305 0.16.0; no lock file)"
     note: >-
-      py20305 (Project Satori) is a Python IEEE 2030.5 client from DER
-      Security. It implements the EndDevice role with certificate-based
-      identity (LFDI/SFDI) and supports device registration, DER program
-      discovery, control polling and metering reports.
+      py20305 (Project Satori), an active Python IEEE 2030.5 client with an
+      async API (CsipClient): discovery, EndDevice registration, program and
+      control polling, MirrorUsagePoint metering and subscriptions, with
+      CSIP-AUS models. TLS through Python's ssl (OpenSSL), offering
+      ECDHE-ECDSA AES-256-GCM and CCM_8.
 
   gridappsd:
     priority: P0
-    status: planned
-    upstream: "GridAPPS-D/PNNL IEEE 2030.5"
+    status: implemented
+    upstream: "GridAPPS-D IEEE 2030.5 server and client (PNNL)"
     repository: "https://github.com/GRIDAPPSD/ieee-2030_5-server-go"
-    version: "planned"
-    license: "BSD-2-Clause"
+    version: "v0.18.0"
+    revision: "d7a4a17042af7506610a973c6be8a5466db34053"
+    client:
+      repository: "https://github.com/GRIDAPPSD/ieee-2030_5-client-go"
+      version: "v0.1.0"
+      revision: "66570b94ea104b46eb12b48ef2451b3454050176"
+    base_images:
+      GOLANG_DIGEST: "sha256:aae9c439b447d24c93ee483408992857cf39a3fb6ab7fe53affc65d834891fa8"   # golang:1.26.8-trixie
+      DEBIAN_DIGEST: "sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad"   # debian:trixie-slim
+    license: "LicenseRef-Battelle-BSD"
     language: "Go"
     independent_engine: true
     roles: [server, client]
-    versions_claimed: ["2018"]
+    versions_claimed: ["2018", "2023"]
+    tls_cipher_suites: ["TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8"]
     note: >-
-      GridAPPS-D from PNNL provides both a Go server
-      (ieee-2030_5-server-go) and a Go client (ieee-2030_5-client-go).
-      The server manages EndDevices and DER programs; the client
-      implements device registration and control polling.
+      The server role runs sep2server, provisions the devices of
+      --tls-dir/devices and the fixture's program and controls through its
+      admin API. The client role is built inside the client module and
+      drives its protocol engine (internal/inverter). Both use the
+      GridAPPS-D fork of crypto/tls and offer only the CCM_8 cipher suite.
 
 images:
   epri: "ghcr.io/otfabric/ieee20305-interop-epri"

@@ -1,177 +1,70 @@
 {
   "schemaVersion": "1.0",
   "name": "baseline",
-  "ieee20305Version": "2018",
-  "description": "One EndDevice with a solar inverter, one DER program with connect/disconnect and fixed power controls. Covers registration, discovery, control polling, and metering report.",
-  "endDevices": [
-    {
-      "sfdi": "123456789",
-      "lfdi": "AB0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCD",
-      "deviceCategory": "0020",
-      "pin": "111115",
-      "description": "OT Fabric Test Inverter",
-      "functionSets": ["DeviceCapability", "EndDevice", "DERProgram", "DERControl", "MeterReading", "Time"]
-    }
-  ],
+  "description": "One device, one DER program with a default control and two controls, and one metering report. Covers registration, discovery, control polling and metering.",
+  "device": {
+    "serial": "ieee20305-interop-device-1",
+    "pin": 111115,
+    "deviceCategory": "00020000"
+  },
   "derPrograms": [
     {
-      "description": "Baseline DER Program",
-      "primacy": 0,
+      "mRID": "A0000000000000000000000000000001",
+      "description": "Baseline DER program",
+      "primacy": 1,
       "defaultControl": {
-        "opModConnect": true,
-        "opModEnergize": true,
-        "opModFixedW": 100
+        "mRID": "A0000000000000000000000000000002",
+        "description": "Connected and energized",
+        "base": {
+          "opModConnect": true,
+          "opModEnergize": true
+        }
       },
       "controls": [
         {
-          "description": "Connect control",
-          "type": "opModConnect",
-          "value": true,
-          "startTime": "${now}",
-          "duration": 3600,
-          "randomizeStart": 0,
-          "randomizeDuration": 0
+          "mRID": "A0000000000000000000000000000003",
+          "description": "Connect and energize",
+          "base": {
+            "opModConnect": true,
+            "opModEnergize": true
+          },
+          "duration": 3600
         },
         {
-          "description": "Fixed power limit",
-          "type": "opModFixedW",
-          "value": 75,
-          "startTime": "${now}",
-          "duration": 1800,
-          "randomizeStart": 0,
-          "randomizeDuration": 0
+          "mRID": "A0000000000000000000000000000004",
+          "description": "Active power at most 50 percent",
+          "base": {
+            "opModMaxLimW": 5000
+          },
+          "duration": 1800
         }
       ]
     }
   ],
-  "certificates": {
-    "caDir": "/tls/ca",
-    "deviceDir": "/tls/device",
-    "serverDir": "/tls/server"
-  },
-  "answers": {
-    "server": {
-      "register": {
-        "payload": {
-          "status": 201,
-          "href": "/edev/1",
-          "sFDI": "123456789",
-          "lFDI": "AB0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCD"
-        }
-      },
-      "discover": {
-        "payload": {
-          "href": "/dcap",
-          "EndDeviceListLink": {"href": "/edev", "all": 1},
-          "TimeLink": {"href": "/tm"},
-          "MirrorUsagePointListLink": {"href": "/mup", "all": 0}
-        }
-      },
-      "poll-controls": {
-        "payload": {
-          "href": "/edev/1/derp/0/derc",
-          "all": 2,
-          "results": 2,
-          "DERControl": [
-            {
-              "href": "/edev/1/derp/0/derc/0",
-              "description": "Connect control",
-              "DERControlBase": {
-                "opModConnect": true
-              },
-              "interval": {
-                "start": "${now}",
-                "duration": 3600
-              }
-            },
-            {
-              "href": "/edev/1/derp/0/derc/1",
-              "description": "Fixed power limit",
-              "DERControlBase": {
-                "opModFixedW": {"value": 75, "multiplier": 0}
-              },
-              "interval": {
-                "start": "${now}",
-                "duration": 1800
-              }
-            }
-          ]
-        }
-      },
-      "report": {
-        "payload": {
-          "status": 201,
-          "href": "/mup/0/mr/0"
-        }
-      },
-      "subscribe": {
-        "payload": {
-          "status": 201,
-          "href": "/sub/0"
-        }
-      }
+  "report": {
+    "mirrorUsagePoint": {
+      "mRID": "A0000000000000000000000000000005",
+      "description": "Inverter output",
+      "roleFlags": "0049",
+      "serviceCategoryKind": 0,
+      "status": 1
     },
-    "client": {
-      "poll-controls": {
-        "payload": {
-          "status": 200
-        }
+    "meterReadings": [
+      {
+        "mRID": "A0000000000000000000000000000006",
+        "description": "Real power",
+        "readingType": {
+          "accumulationBehaviour": 12,
+          "commodity": 1,
+          "dataQualifier": 2,
+          "flowDirection": 1,
+          "kind": 37,
+          "phase": 0,
+          "powerOfTenMultiplier": 0,
+          "uom": 38
+        },
+        "value": 5000
       }
-    }
-  },
-  "samples": {
-    "register-device": {
-      "operation": "register",
-      "from": "client",
-      "payload": {
-        "deviceCategory": "0020",
-        "lFDI": "AB0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCD",
-        "sFDI": "123456789"
-      }
-    },
-    "discover-capability": {
-      "operation": "discover",
-      "from": "client",
-      "payload": {}
-    },
-    "poll-der-controls": {
-      "operation": "poll-controls",
-      "from": "client",
-      "payload": {
-        "derProgramHref": "/edev/1/derp/0"
-      }
-    },
-    "report-meter-reading": {
-      "operation": "report",
-      "from": "client",
-      "payload": {
-        "mirrorUsagePointHref": "/mup/0",
-        "meterReading": {
-          "description": "Real Power (W)",
-          "ReadingType": {
-            "commodity": 1,
-            "flowDirection": 1,
-            "kind": 37,
-            "powerOfTenMultiplier": 0,
-            "uom": 38
-          },
-          "Reading": {
-            "value": 5000,
-            "timePeriod": {
-              "start": "${now}",
-              "duration": 300
-            }
-          }
-        }
-      }
-    },
-    "subscribe-der-controls": {
-      "operation": "subscribe",
-      "from": "client",
-      "payload": {
-        "subscribedResource": "/edev/1/derp/0/derc",
-        "notificationURI": "/notify"
-      }
-    }
+    ]
   }
 }

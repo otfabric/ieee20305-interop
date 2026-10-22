@@ -1,10 +1,10 @@
 # Container contract
 
-Version: **0.1 (draft)**. `contract_version` in [versions.yaml](../versions.yaml).
+Version: **0.2 (draft)**. `contract_version` in [versions.yaml](../versions.yaml).
 
-> Not yet implemented by any adapter. All four adapters (`epri`, `envoy`,
-> `py20305`, `gridappsd`) are at status `planned`. It stays a draft (0.x)
-> until at least one adapter implements every part of it;
+> Implemented by the `gridappsd` adapter (server and client, without `call`,
+> `client run` and `subscribe`). It stays a draft (0.x) until the adapters
+> together implement every part of it;
 > [Gaps before 1.0](#gaps-before-10) lists what is missing. Until 1.0 it may
 > change without a major version bump.
 
@@ -22,7 +22,6 @@ compatible line and changes only with the major version.
 - [`server`](#server)
 - [`client`](#client)
 - [`call`](#call)
-- [Answers](#answers)
 - [Transport security](#transport-security)
 - [Events](#events)
 - [Result document](#result-document)
@@ -40,47 +39,49 @@ compatible line and changes only with the major version.
 | Image | `ghcr.io/otfabric/ieee20305-interop-<adapter>` |
 | Entrypoint | `ieee20305-interop` (`/usr/local/bin/ieee20305-interop`) |
 | Default command | `server` |
-| Protocol | IEEE 2030.5 (SEP 2.0) over HTTPS with mutual TLS |
+| Protocol | IEEE 2030.5 over HTTPS with mutual TLS, TLS 1.2 |
 | Port | 443/tcp |
-| Path | Resource-based: `/dcap` (DeviceCapability), `/edev` (EndDeviceList), `/edev/{id}/derp` (DERProgramList), etc. |
-| Security | Mutual TLS with device certificates; device identity by LFDI (Long-Form Device Identifier, SHA-256 of the certificate) and SFDI (Short-Form Device Identifier, truncated fingerprint) |
+| Entry point of the resource tree | `/dcap` (DeviceCapability); every other path is the server's choice and found through links |
 | User | non-root, uid 10001 |
 | Fixtures | `/fixtures/<name>/fixture.json`, baked in; mount over `/fixtures` to replace, or pass `--fixture` |
+| TLS material | none in the image; mounted, see [Transport security](#transport-security) |
 | Readiness file | `/run/ieee20305-interop/ready` |
 | Control socket | `/run/ieee20305-interop/control.sock` (see [`call`](#call)) |
 | Health check | built in: `test -f /run/ieee20305-interop/ready` |
-| Licences | `/licenses/` |
+| Licences | `/licenses/`, with `THIRD_PARTY_NOTICES.md` |
 
 ## How IEEE 2030.5 shapes this contract
 
 The contracts of the sibling repositories (OCPP, Modbus, IEC 104) have a
-server with a one-shot or long-running client. IEEE 2030.5 has its own shape:
+server that answers each request from a fixture. IEEE 2030.5 has its own
+shape:
 
-1. **HTTPS, not WebSocket.** IEEE 2030.5 uses RESTful HTTPS. Clients poll
-   for resources; servers may also push via long-poll or subscription
-   notifications. Every request is an HTTP method on a resource URL.
-2. **Mutual TLS is mandatory.** Unlike OCPP's optional security profiles,
-   IEEE 2030.5 requires mTLS in every deployment. Device identity is derived
-   from the TLS certificate (LFDI/SFDI). The test generates certificates and
-   mounts them.
-3. **XML on the wire, JSON in the contract.** The protocol uses XML
-   (application/sep+xml). The adapter translates to and from JSON for the
-   contract's documents (events, results, fixtures). This keeps the contract
-   language-neutral.
-4. **Resource-oriented operations.** Instead of named RPC actions, IEEE
-   2030.5 has resources (EndDevice, DERProgram, DERControl, MeterReading,
-   etc.). The contract names operations by what they do: `register`,
-   `discover`, `poll-controls`, `report`, `subscribe`.
-5. **Answers come from the fixture.** When a server receives a request, it
-   answers with the response the fixture defines for that resource and
-   operation.
+1. **HTTPS, not WebSocket.** IEEE 2030.5 is RESTful. Clients poll resources
+   and follow links from `/dcap`; servers push only through subscriptions.
+2. **Mutual TLS is mandatory.** Device identity is the LFDI and SFDI of the
+   device certificate. The tests generate the certificates and mount them;
+   there is no plain-HTTP mode.
+3. **A server is seeded, not scripted.** A server keeps the state of a
+   deployment: provisioned devices, registrations, programs, controls and
+   mirrors. The fixture seeds that state when the server starts; the server
+   then answers every request itself. A fixture never prescribes an answer
+   to a request.
+4. **The server picks its paths.** Links, `href`s and identifiers below
+   `/dcap` belong to the server. Fixtures identify resources by mRID and
+   description, and clients find them by following links.
+5. **XML on the wire, JSON in the contract.** The protocol uses
+   `application/sep+xml`. The contract's documents (events, results,
+   fixtures, capabilities) are JSON, so that a consumer in any language can
+   read them with `jq`.
+6. **Operations name what a device does**: `register`, `discover`,
+   `poll-controls`, `report`, `subscribe`.
 
 ## Commands
 
 ```text
-ieee20305-interop server [flags]
-ieee20305-interop client run --url URL [flags]
-ieee20305-interop client <operation> --url URL [flags]
+ieee20305-interop server --version V --tls-dir DIR [flags]
+ieee20305-interop client <operation> --version V --url URL --tls-dir DIR [flags]
+ieee20305-interop client run --version V --url URL --tls-dir DIR [flags]
 ieee20305-interop call <operation> [--device SFDI] [--payload JSON] [--timeout-ms N] [--control-socket PATH]
 ieee20305-interop print-capabilities
 ieee20305-interop print-fixture [NAME]
@@ -89,139 +90,143 @@ ieee20305-interop version
 
 Flags have the form `--name value`. An unknown flag, a flag given twice, a
 missing required flag, or a value that is not valid for the flag is a usage
-error (exit 2). Flags may appear in any order.
+error (exit 2), detected before anything touches the network. Flags may
+appear in any order.
 
-### Common flags
+### Flags
 
 | Flag | Commands | Description |
 |------|----------|-------------|
+| `--version V` | `server`, `client` | IEEE 2030.5 edition: `2018` or `2023`; required. One the adapter does not declare is exit 5 |
+| `--tls-dir DIR` | `server`, `client` | Directory with the TLS material of this end; required (see [Transport security](#transport-security)) |
+| `--url URL` | `client` | URL of the server's DeviceCapability, `https://host[:port]/dcap`; required |
 | `--port N` | `server` | Listen port (default 443) |
-| `--tls-dir DIR` | `server`, `client` | Directory with the TLS material (see [Transport security](#transport-security)) |
-| `--fixture PATH` | `server`, `client run` | Path to a fixture file; default: the baked baseline |
-| `--ready-file PATH` | `server`, `client run` | Path to write when ready (default `/run/ieee20305-interop/ready`) |
-| `--control-socket PATH` | `server`, `client run` | Unix socket for `call` (default `/run/ieee20305-interop/control.sock`) |
-| `--connect-timeout-ms N` | `client` | Connection timeout in milliseconds |
-| `--timeout-ms N` | `call` | Per-operation timeout in milliseconds |
-| `--url URL` | `client` | Server URL (`https://host:port`) |
-| `--device SFDI` | `call` (server) | Target device for server-initiated operations |
-| `--payload JSON` | `client <op>`, `call` | JSON payload for the operation |
-| `--hold-ms N` | `client run` | Disconnect after N ms (for timed tests) |
+| `--fixture PATH` | `server`, `client` | Path to a fixture file; default: the baked `baseline` |
+| `--ready-file PATH` | `server`, `client run` | Path to create when ready (default `/run/ieee20305-interop/ready`) |
+| `--control-socket PATH` | `server`, `client run`, `call` | Unix socket for `call` (default `/run/ieee20305-interop/control.sock`) |
+| `--connect-timeout-ms N` | `client` | TCP connection timeout (default 10000) |
+| `--timeout-ms N` | `client`, `call` | Timeout of the whole operation (default 30000) |
+| `--payload JSON` | `client <op>`, `call` | Operation-specific input; reserved |
+| `--device SFDI` | `call` on a server | Target device of a server-initiated operation |
 
 ## `server`
 
-Starts an IEEE 2030.5 server (utility/aggregator role). It listens on the
-configured port with mTLS, serves the resources the fixture defines, and
-answers requests from registered EndDevices.
+Starts an IEEE 2030.5 server (utility or aggregator role) on `--port` with
+mutual TLS, for the edition `--version`. Before it is ready, the server:
 
-The server creates the readiness file once it is listening and accepting TLS
-connections. Events are written to stdout as JSON Lines.
+1. provisions every device whose certificate is in `--tls-dir/devices`, by
+   the LFDI and SFDI of that certificate, with the fixture's registration
+   PIN; a device that is not provisioned is not registered;
+2. seeds, for each provisioned device, the fixture's DER programs with their
+   default control and controls (see [docs/FIXTURES.md](FIXTURES.md)).
+
+It then creates the readiness file and writes the `ready` event. On SIGTERM
+it stops within 10 seconds, writes `stopped` and exits 0.
+
+A fixture the adapter cannot seed (a control function or a number of
+programs the upstream cannot represent) is exit 5, not a silent subset.
 
 ## `client`
 
-### `client run`
-
-Connects to a server, registers the fixture's EndDevice, and stays
-connected. Use `docker exec <container> ieee20305-interop call ...` to make
-it perform operations on the open connection.
-
 ### `client <operation>`
 
-A one-shot client: connect, perform one operation, print the result document,
-disconnect. Operations:
+A one-shot client: connect to `--url`, perform one operation as the device of
+`--tls-dir`, print the [result document](#result-document), exit.
 
-| Operation | Description |
-|-----------|-------------|
-| `register` | POST the EndDevice to `/edev` |
-| `discover` | GET `/dcap` and follow links to discover resources |
-| `poll-controls` | GET the DERControlList for the device's DER program |
-| `report` | POST a MeterReading or DERStatus to the server |
-| `subscribe` | POST a Subscription for a resource |
+| Operation | What the client does | `ok` when |
+|-----------|----------------------|-----------|
+| `discover` | GET `/dcap` | the server returned a DeviceCapability |
+| `register` | find its own EndDevice in the EndDeviceList (by LFDI), POST one if there is none, then GET its Registration | the Registration's PIN is the fixture's |
+| `poll-controls` | follow the device's FunctionSetAssignments to its DER programs, and GET their default controls and controls | every DER program of the fixture, and each of its controls, is served (matched by description) |
+| `report` | POST the fixture's MirrorUsagePoint with its MirrorMeterReadings | the server created the mirror (201 with a `Location`) |
+| `subscribe` | POST a Subscription to the device's DER program list | the server created the subscription |
+
+### `client run`
+
+Connects, registers, and stays connected as the fixture's device, polling at
+the server's poll rates. `docker exec <container> ieee20305-interop call ...`
+makes it perform operations. Reserved: no adapter implements it yet (exit 5).
 
 ## `call`
 
 Sends an operation through the control socket of a running `server` or
-`client run` container:
-
-```bash
-docker exec <container> ieee20305-interop call register
-docker exec <container> ieee20305-interop call --device <SFDI> poll-controls
-```
-
-From a server, `--device SFDI` names the target EndDevice. From a client
-run, the device is the fixture's own EndDevice.
-
-## Answers
-
-When a server receives a request, it looks up the answer in the fixture's
-`answers.server` for the operation and responds with the fixture's payload
-(translated to XML). When a client run receives a server-initiated request
-(e.g., a DERControl update via subscription), it looks up
-`answers.client`.
-
-An operation without an answer in the fixture returns HTTP 404
-(NotFound) or the IEEE 2030.5 equivalent error response.
+`client run` container. From a server, `--device SFDI` names the target
+device. Reserved: no adapter implements it yet (exit 5).
 
 ## Transport security
 
-IEEE 2030.5 mandates mutual TLS. The `--tls-dir` directory contains:
+IEEE 2030.5 mandates mutual TLS (TLS 1.2). Each end gets a directory:
 
 ```text
-server/     server.crt, server.key, ca.crt
-client/     client.crt, client.key, ca.crt
+server/   server.crt  server.key  ca.crt  devices/<serial>.crt ...
+client/   client.crt  client.key  ca.crt
 ```
 
-- `server.crt` / `server.key`: the server's TLS certificate and key.
-- `client.crt` / `client.key`: the client's device certificate and key.
-  The LFDI is the SHA-256 fingerprint of `client.crt`; the SFDI is the
-  first 36 bits of the LFDI, encoded as a decimal with a check digit.
-- `ca.crt`: the Certificate Authority that signed the peer's certificate.
+- `server.crt`, `server.key`: the server's certificate (ECDSA P-256) and
+  key. The certificate has a critical subjectAltName with the names clients
+  connect to, a critical keyUsage, and extendedKeyUsage serverAuth and
+  clientAuth.
+- `client.crt`, `client.key`: the device certificate (ECDSA P-256) and key.
+  Its critical subjectAltName holds an RFC 4108 HardwareModuleName (the
+  fixture's serial) and it has the IEEE 2030.5 certificate policies.
+- `ca.crt`: the CA that signed the other end's certificate.
+- `devices/`: the certificates of the devices the server provisions.
 
-The test scripts generate all TLS material at runtime; nothing is committed
-or baked into images.
+Identity: the LFDI is the leftmost 160 bits of the SHA-256 of the device
+certificate (DER), as 40 upper-case hex digits. The SFDI is the leftmost 36
+bits of it as a decimal, followed by a check digit that makes the sum of all
+digits a multiple of 10.
+
+The cipher suite IEEE 2030.5 mandates is
+`TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8`. An adapter declares the suites it
+offers in its capabilities (`tls.cipherSuites`); a test skips a pairing
+whose two ends have no suite in common.
+
+The tests generate all TLS material at run time (`make_pki` in
+[scripts/lib.sh](../scripts/lib.sh); `make pki` for local work). Nothing is
+committed or baked into an image (REQUIREMENTS.md R7.3).
+
+A `--tls-dir` without the files its command needs is exit 4. A failed TLS
+handshake is exit 3 with the error code `connect-failed`.
 
 ## Events
 
-Both `server` and `client run` write JSON Lines to stdout. Every line is a
-JSON object with at least `event` and `time` fields.
+`server` and `client run` write JSON Lines to stdout. Every line is a JSON
+object with at least `event` and `time` (RFC 3339 UTC).
 
 ### Server events
 
 | Event | Fields | When |
 |-------|--------|------|
-| `ready` | `adapter`, `port`, `fixture` | Listening and accepting connections |
-| `device-registered` | `sfdi`, `lfdi` | An EndDevice registered |
-| `request-received` | `sfdi`, `method`, `path`, `operation` | Any request received |
-| `response-sent` | `sfdi`, `method`, `path`, `status` | Response sent |
-| `subscription-created` | `sfdi`, `resource` | A subscription was created |
-| `connection-rejected` | `sfdi`, `reason` | TLS handshake or identity rejected |
+| `device-provisioned` | `sfdi`, `lfdi` | A device of `--tls-dir/devices` was provisioned and seeded |
+| `ready` | `adapter`, `version`, `port`, `fixture` | Listening and accepting connections |
+| `connection-rejected` | `reason` | A TLS handshake or device identity was refused |
 | `stopped` | | Clean shutdown |
 
-### Client events
+Reserved, for adapters whose upstream reports them: `device-registered`
+(`sfdi`, `lfdi`), `request-received` (`sfdi`, `method`, `path`),
+`subscription-created` (`sfdi`, `resource`).
 
-| Event | Fields | When |
-|-------|--------|------|
-| `ready` | `sfdi`, `url` | Connected and registered |
-| `request-sent` | `method`, `path`, `operation` | A request was sent |
-| `response-received` | `method`, `path`, `status` | Response received |
-| `control-received` | `operation`, `payload` | A control update received |
-| `connection-failed` | `detail` | Cannot connect or TLS failure |
-| `stopped` | | Clean shutdown |
+### Client events (`client run`)
+
+Reserved: `ready` (`sfdi`, `url`), `control-received` (`mRID`,
+`description`), `connection-failed` (`detail`), `stopped`.
 
 ## Result document
 
-A one-shot `client <operation>` prints one JSON line to stdout: the result
-document.
+A one-shot `client <operation>` prints one JSON line to stdout, and exits
+with the code that matches it:
 
 ```json
 {
   "schemaVersion": "1.0",
-  "adapter": "epri",
+  "adapter": "gridappsd",
   "version": "2018",
-  "operation": "discover",
+  "operation": "report",
   "ok": true,
   "error": null,
-  "request": {"method": "GET", "path": "/dcap"},
-  "response": {"status": 200, "body": {}},
+  "request": {"method": "POST", "path": "/mup"},
+  "response": {"status": 201, "body": {"location": "/mup/7FB5962D656ADCC2FA3BAD4A841833C6"}},
   "elapsedMs": 42
 }
 ```
@@ -231,19 +236,29 @@ On failure:
 ```json
 {
   "schemaVersion": "1.0",
-  "adapter": "epri",
+  "adapter": "gridappsd",
   "version": "2018",
-  "operation": "register",
+  "operation": "discover",
   "ok": false,
-  "error": {"code": "connect-failed", "detail": "TLS handshake failed"},
+  "error": {"code": "connect-failed", "detail": "remote error: tls: bad certificate"},
   "request": null,
   "response": null,
-  "elapsedMs": 1502
+  "elapsedMs": 31
 }
 ```
 
-Error codes: `connect-failed`, `timeout`, `not-connected`, `unsupported`,
-`invalid-request`, `server-error`.
+`request` is the last request the operation sent; `response.body` is
+informative and adapter-specific (it may be absent). Consumers decide on
+`ok`, `error.code` and the exit code.
+
+| `error.code` | Exit | Meaning |
+|--------------|------|---------|
+| `connect-failed` | 3 | DNS, TCP or TLS handshake failure |
+| `timeout` | 1 | `--timeout-ms` elapsed |
+| `server-error` | 1 | The server answered with an error, or with something the operation cannot accept |
+| `invalid-request` | 1 | The operation could not be built from the fixture or the TLS material |
+| `unsupported` | 5 | The adapter does not perform this operation |
+| `not-connected` | 1 | Reserved for `call` |
 
 ## `print-capabilities`
 
@@ -257,41 +272,66 @@ See [docs/CAPABILITIES.md](CAPABILITIES.md).
 ieee20305-interop print-fixture [NAME]
 ```
 
-Prints the named baked fixture (default `baseline`) as JSON to stdout. The
-fixture validates against the fixture schema. See [docs/FIXTURES.md](FIXTURES.md).
+Prints the named baked fixture (default `baseline`), byte for byte as in
+this repository. An unknown name is exit 1. See [docs/FIXTURES.md](FIXTURES.md).
 
 ## Exit codes
 
 | Code | Meaning |
 |------|---------|
 | 0 | Success |
-| 1 | Operation failed (server error, timeout, not-connected) |
-| 2 | Usage error (bad flags, missing required arguments) |
-| 3 | Connection failed (TLS handshake, DNS, network) |
-| 4 | Invalid fixture (parse error, schema violation, bad certificate reference) |
-| 5 | Unsupported (operation or feature the adapter does not implement) |
+| 1 | Operation failed (server error, timeout), or an unknown fixture name |
+| 2 | Usage error (bad flags, missing required flags), before any network access |
+| 3 | Connection failed (DNS, TCP, TLS handshake) |
+| 4 | Invalid fixture or TLS material (parse error, schema violation, missing file) |
+| 5 | Unsupported (command, operation, edition or fixture content the adapter does not implement) |
 
 ## Output rules
 
-1. **stdout is structured.** `server` and `client run` write JSON Lines
-   (one JSON object per line). `client <op>` writes one JSON line (the
-   result document). `print-capabilities` and `print-fixture` each write
-   one JSON document. `version` writes one line.
-2. **stderr is for humans.** Diagnostic messages, progress, errors go to
+1. **stdout is structured.** `server` and `client run` write JSON Lines.
+   `client <op>` writes one JSON line (the result document).
+   `print-capabilities` writes one JSON line, `print-fixture` one JSON
+   document, `version` one line.
+2. **stderr is for humans.** Diagnostics, upstream logs and errors go to
    stderr.
-3. **No mixing.** A consumer reads stdout with `jq`; anything that is not
-   JSON on stdout is a contract violation.
+3. **No mixing.** Anything on stdout that is not JSON is a contract
+   violation, which the smoke and interop tests check.
 
 ## Gaps before 1.0
 
-- [ ] No adapter is built yet (all `planned`).
-- [ ] Subscription/notification push model not fully specified.
-- [ ] Server-initiated DERControl dispatch through `call` not implemented.
-- [ ] CSIP and CSIP-AUS profile-specific behaviours not tested.
-- [ ] Flow reservation (IEEE 2030.5 pricing/billing) not covered.
-- [ ] Device capability negotiation details to be refined after first adapter.
+- [ ] `call`, `client run` and the client events: no adapter implements
+      them yet.
+- [ ] `subscribe` and notifications: specified for the client, not
+      implemented; the server side of notifications is not specified.
+- [ ] `response.body` is adapter-specific; 1.0 should define a neutral form
+      per operation, or drop it.
+- [ ] Server events that need upstream hooks (`device-registered`,
+      `request-received`) are reserved only.
+- [ ] CSIP-AUS behaviour (connection points, site limits) is not
+      exercised by any fixture.
+- [ ] Only one server and one client upstream so far; the contract is not
+      yet shaped by a second implementation of either role.
 
 ## Changes
+
+### 0.2 (2026-10-22)
+
+From implementing the `gridappsd` adapter:
+
+- `--version` and `--tls-dir` are required for `server` and `client`;
+  `--url` names the server's `/dcap`. There is no plain-HTTP mode.
+- `--tls-dir` layout: one directory per end, with `devices/` for the
+  certificates a server provisions. Certificate profile and the LFDI/SFDI
+  rules stated.
+- Servers are seeded by the fixture (devices, PIN, DER programs, controls)
+  instead of answering each request from it. The `answers` and `samples`
+  of fixtures are removed.
+- Operations defined by what the client does and when it is `ok`.
+- New server event `device-provisioned`; `ready` carries `version`.
+- Capabilities declare the TLS versions and cipher suites (`tls`); pairings
+  without a common suite are skipped.
+- Result-document error codes mapped to exit codes; an unknown fixture name
+  in `print-fixture` is exit 1.
 
 ### 0.1 (2026-10-22)
 
