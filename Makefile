@@ -40,7 +40,7 @@ export REGISTRY VERSION
 
 # image-%, smoke-%, run-% and candidate-% are pattern rules, which make
 # ignores for .PHONY targets: they depend on FORCE instead.
-.PHONY: help all ci validate versions schemas fixtures lint images smoke interop \
+.PHONY: help all ci validate versions schemas fixtures lint images smoke interop selftest \
         capabilities pki lock-py20305 lock-envoy release-prep release-check buildx-setup buildx publish publish-arch publish-manifest digests documents run-% clean FORCE
 FORCE:
 
@@ -117,6 +117,8 @@ smoke-%: FORCE ## Smoke test one adapter, e.g. smoke-epri
 interop: ## Cross-stack self-test: every client against every server
 	@scripts/interop.sh $(ADAPTERS)
 
+selftest: validate smoke interop ## Validate, then the smoke and cross-stack self-tests of the built images
+
 # ── Dependency locks ──────────────────────────────────────────────────────────
 
 UV_VERSION ?= 0.13.5
@@ -165,9 +167,9 @@ capabilities: ## Print the capability document of every adapter
 
 RUN_PORT ?= 8443
 
-pki: ## Write a throwaway PKI to ./tls for compose.yaml and run-% (server names: the compose services, localhost, 127.0.0.1)
+pki: ## Write a throwaway PKI to ./tls for compose.yaml and run-% (server names: the compose services, localhost, 127.0.0.1; notification listener: localhost)
 	@rm -rf tls
-	@bash -c 'source scripts/lib.sh && make_pki tls "$$(jq -r .device.serial fixtures/baseline/fixture.json)" gridappsd-server envoy-server localhost 127.0.0.1' \
+	@bash -c 'source scripts/lib.sh && make_pki tls "$$(jq -r .device.serial fixtures/baseline/fixture.json)" gridappsd-server envoy-server localhost 127.0.0.1 -- localhost' \
 		&& echo "./tls: server/ (with devices/), client/, unprovisioned/, other-ca/, untrusted/"
 
 run-%: FORCE ## Run one reference server on 127.0.0.1:$(RUN_PORT) with ./tls (make pki first), e.g. run-gridappsd

@@ -2,46 +2,104 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/otfabric/ieee20305-interop/schemas/fixture.schema.json",
   "title": "ieee20305-interop fixture",
-  "description": "What a server is seeded with and what a client reports, for one scenario. See docs/FIXTURES.md.",
+  "description": "What a server is seeded with and what a client sends, for one scenario. Fixture schema 1.1; see docs/FIXTURES.md.",
   "type": "object",
-  "required": ["schemaVersion", "name", "description", "device", "derPrograms", "report"],
+  "required": [
+    "schemaVersion",
+    "name",
+    "description",
+    "device",
+    "derPrograms",
+    "report"
+  ],
   "additionalProperties": false,
   "properties": {
-    "schemaVersion": {"const": "1.0"},
-    "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
-    "description": {"type": "string", "minLength": 1},
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1
+    },
     "device": {
       "type": "object",
       "description": "The device of the scenario. Its LFDI and SFDI are those of the device certificate a test generates for the serial.",
-      "required": ["serial", "pin", "deviceCategory"],
+      "required": [
+        "serial",
+        "pin",
+        "deviceCategory"
+      ],
       "additionalProperties": false,
       "properties": {
-        "serial": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", "description": "Serial number in the HardwareModuleName of the device certificate"},
-        "pin": {"type": "integer", "minimum": 0, "maximum": 999999, "description": "Registration PIN (PINType): five digits and a check digit"},
-        "deviceCategory": {"$ref": "#/$defs/hex32", "description": "DeviceCategoryType bitmap"}
+        "serial": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+          "description": "Serial number in the HardwareModuleName of the device certificate"
+        },
+        "pin": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 999999,
+          "description": "Registration PIN (PINType): five digits and a check digit"
+        },
+        "deviceCategory": {
+          "$ref": "#/$defs/hex32",
+          "description": "DeviceCategoryType bitmap"
+        }
       }
     },
     "derPrograms": {
       "type": "array",
       "minItems": 1,
-      "items": {"$ref": "#/$defs/derProgram"}
+      "items": {
+        "$ref": "#/$defs/derProgram"
+      }
     },
     "report": {
       "type": "object",
       "description": "The metering a client reports: a MirrorUsagePoint and its MirrorMeterReadings.",
-      "required": ["mirrorUsagePoint", "meterReadings"],
+      "required": [
+        "mirrorUsagePoint",
+        "meterReadings"
+      ],
       "additionalProperties": false,
       "properties": {
         "mirrorUsagePoint": {
           "type": "object",
-          "required": ["mRID", "description", "roleFlags", "serviceCategoryKind", "status"],
+          "required": [
+            "mRID",
+            "description",
+            "roleFlags",
+            "serviceCategoryKind",
+            "status"
+          ],
           "additionalProperties": false,
           "properties": {
-            "mRID": {"$ref": "#/$defs/mrid"},
-            "description": {"$ref": "#/$defs/string32"},
-            "roleFlags": {"type": "string", "pattern": "^[0-9A-F]{4}$", "description": "RoleFlagsType bitmap"},
-            "serviceCategoryKind": {"type": "integer", "minimum": 0, "maximum": 255},
-            "status": {"type": "integer", "minimum": 0, "maximum": 255}
+            "mRID": {
+              "$ref": "#/$defs/mrid"
+            },
+            "description": {
+              "$ref": "#/$defs/string32"
+            },
+            "roleFlags": {
+              "type": "string",
+              "pattern": "^[0-9A-F]{4}$",
+              "description": "RoleFlagsType bitmap"
+            },
+            "serviceCategoryKind": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "status": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            }
           }
         },
         "meterReadings": {
@@ -49,67 +107,206 @@
           "minItems": 1,
           "items": {
             "type": "object",
-            "required": ["mRID", "description", "readingType", "value"],
+            "required": [
+              "mRID",
+              "description",
+              "readingType",
+              "value"
+            ],
             "additionalProperties": false,
             "properties": {
-              "mRID": {"$ref": "#/$defs/mrid"},
-              "description": {"$ref": "#/$defs/string32"},
+              "mRID": {
+                "$ref": "#/$defs/mrid"
+              },
+              "description": {
+                "$ref": "#/$defs/string32"
+              },
               "readingType": {
                 "type": "object",
                 "description": "ReadingType elements, by their IEEE 2030.5 names.",
-                "required": ["commodity", "kind", "uom"],
+                "required": [
+                  "commodity",
+                  "kind",
+                  "uom"
+                ],
                 "additionalProperties": false,
                 "properties": {
-                  "accumulationBehaviour": {"$ref": "#/$defs/uint8"},
-                  "commodity": {"$ref": "#/$defs/uint8"},
-                  "dataQualifier": {"$ref": "#/$defs/uint8"},
-                  "flowDirection": {"$ref": "#/$defs/uint8"},
-                  "kind": {"$ref": "#/$defs/uint8"},
-                  "phase": {"$ref": "#/$defs/uint8"},
-                  "powerOfTenMultiplier": {"type": "integer", "minimum": -9, "maximum": 9},
-                  "uom": {"$ref": "#/$defs/uint8"}
+                  "accumulationBehaviour": {
+                    "$ref": "#/$defs/uint8"
+                  },
+                  "commodity": {
+                    "$ref": "#/$defs/uint8"
+                  },
+                  "dataQualifier": {
+                    "$ref": "#/$defs/uint8"
+                  },
+                  "flowDirection": {
+                    "$ref": "#/$defs/uint8"
+                  },
+                  "kind": {
+                    "$ref": "#/$defs/uint8"
+                  },
+                  "phase": {
+                    "$ref": "#/$defs/uint8"
+                  },
+                  "powerOfTenMultiplier": {
+                    "type": "integer",
+                    "minimum": -9,
+                    "maximum": 9
+                  },
+                  "uom": {
+                    "$ref": "#/$defs/uint8"
+                  }
                 }
               },
-              "value": {"type": "integer", "minimum": -140737488355328, "maximum": 140737488355328}
+              "value": {
+                "type": "integer",
+                "minimum": -140737488355328,
+                "maximum": 140737488355328
+              }
             }
           }
         }
       }
+    },
+    "tariffs": {
+      "type": "array",
+      "description": "Pricing: TariffProfiles with their RateComponents and TimeTariffIntervals.",
+      "items": {
+        "$ref": "#/$defs/tariff"
+      }
+    },
+    "messages": {
+      "type": "array",
+      "description": "Messaging: MessagingPrograms with their TextMessages.",
+      "items": {
+        "$ref": "#/$defs/messagingProgram"
+      }
+    },
+    "der": {
+      "$ref": "#/$defs/der"
+    },
+    "logEvent": {
+      "$ref": "#/$defs/logEvent"
+    },
+    "flowReservation": {
+      "$ref": "#/$defs/flowReservation"
     }
   },
   "$defs": {
-    "mrid": {"type": "string", "pattern": "^[0-9A-F]{32}$", "description": "mRIDType: 128 bits as upper-case hexadecimal"},
-    "hex32": {"type": "string", "pattern": "^[0-9A-F]{8}$"},
-    "string32": {"type": "string", "maxLength": 32},
-    "uint8": {"type": "integer", "minimum": 0, "maximum": 255},
+    "mrid": {
+      "type": "string",
+      "pattern": "^[0-9A-F]{32}$",
+      "description": "mRIDType: 128 bits as upper-case hexadecimal"
+    },
+    "hex32": {
+      "type": "string",
+      "pattern": "^[0-9A-F]{8}$"
+    },
+    "string32": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "uint8": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 255
+    },
     "controlBase": {
       "type": "object",
       "description": "DERControlBase elements, by their IEEE 2030.5 names and value types.",
       "minProperties": 1,
       "additionalProperties": false,
       "properties": {
-        "opModConnect": {"type": "boolean"},
-        "opModEnergize": {"type": "boolean"},
-        "opModMaxLimW": {"type": "integer", "minimum": 0, "maximum": 10000, "description": "PerCent: hundredths of a percent of the maximum active power"},
-        "opModFixedW": {"type": "integer", "minimum": -10000, "maximum": 10000, "description": "SignedPerCent: hundredths of a percent of the maximum active power"}
+        "opModConnect": {
+          "type": "boolean"
+        },
+        "opModEnergize": {
+          "type": "boolean"
+        },
+        "opModMaxLimW": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000,
+          "description": "PerCent: hundredths of a percent of the maximum active power"
+        },
+        "opModFixedW": {
+          "type": "integer",
+          "minimum": -10000,
+          "maximum": 10000,
+          "description": "SignedPerCent: hundredths of a percent of the maximum active power"
+        },
+        "opModExpLimW": {
+          "$ref": "#/$defs/activePower",
+          "description": "CSIP-AUS export limit (csipaus namespace)"
+        },
+        "opModImpLimW": {
+          "$ref": "#/$defs/activePower",
+          "description": "CSIP-AUS import limit (csipaus namespace)"
+        },
+        "opModGenLimW": {
+          "$ref": "#/$defs/activePower",
+          "description": "CSIP-AUS generation limit (csipaus namespace)"
+        },
+        "opModLoadLimW": {
+          "$ref": "#/$defs/activePower",
+          "description": "CSIP-AUS load limit (csipaus namespace)"
+        },
+        "opModVoltVar": {
+          "$ref": "#/$defs/mrid",
+          "description": "The mRID of one of the program's curves, served as a DERCurveLink"
+        },
+        "opModVoltWatt": {
+          "$ref": "#/$defs/mrid",
+          "description": "The mRID of one of the program's curves, served as a DERCurveLink"
+        },
+        "opModFreqWatt": {
+          "$ref": "#/$defs/mrid",
+          "description": "The mRID of one of the program's curves, served as a DERCurveLink"
+        },
+        "opModWattPF": {
+          "$ref": "#/$defs/mrid",
+          "description": "The mRID of one of the program's curves, served as a DERCurveLink"
+        }
       }
     },
     "derProgram": {
       "type": "object",
-      "required": ["mRID", "description", "primacy", "controls"],
+      "required": [
+        "mRID",
+        "description",
+        "primacy",
+        "controls"
+      ],
       "additionalProperties": false,
       "properties": {
-        "mRID": {"$ref": "#/$defs/mrid"},
-        "description": {"$ref": "#/$defs/string32"},
-        "primacy": {"$ref": "#/$defs/uint8"},
+        "mRID": {
+          "$ref": "#/$defs/mrid"
+        },
+        "description": {
+          "$ref": "#/$defs/string32"
+        },
+        "primacy": {
+          "$ref": "#/$defs/uint8"
+        },
         "defaultControl": {
           "type": "object",
-          "required": ["mRID", "description", "base"],
+          "required": [
+            "mRID",
+            "description",
+            "base"
+          ],
           "additionalProperties": false,
           "properties": {
-            "mRID": {"$ref": "#/$defs/mrid"},
-            "description": {"$ref": "#/$defs/string32"},
-            "base": {"$ref": "#/$defs/controlBase"}
+            "mRID": {
+              "$ref": "#/$defs/mrid"
+            },
+            "description": {
+              "$ref": "#/$defs/string32"
+            },
+            "base": {
+              "$ref": "#/$defs/controlBase"
+            }
           }
         },
         "controls": {
@@ -117,16 +314,529 @@
           "items": {
             "type": "object",
             "description": "A DERControl, scheduled start seconds after the server starts, for duration seconds.",
-            "required": ["mRID", "description", "base", "duration"],
+            "required": [
+              "mRID",
+              "description",
+              "base",
+              "duration"
+            ],
             "additionalProperties": false,
             "properties": {
-              "mRID": {"$ref": "#/$defs/mrid"},
-              "description": {"$ref": "#/$defs/string32"},
-              "base": {"$ref": "#/$defs/controlBase"},
-              "duration": {"type": "integer", "minimum": 1, "maximum": 4294967295},
-              "start": {"type": "integer", "minimum": 0, "maximum": 31536000, "description": "Seconds after the server starts at which the control starts (default 0)"}
+              "mRID": {
+                "$ref": "#/$defs/mrid"
+              },
+              "description": {
+                "$ref": "#/$defs/string32"
+              },
+              "base": {
+                "$ref": "#/$defs/controlBase"
+              },
+              "duration": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              "start": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 31536000,
+                "description": "Seconds after the server starts at which the control starts (default 0)"
+              }
             }
           }
+        },
+        "curves": {
+          "type": "array",
+          "description": "The program's DERCurves",
+          "items": {
+            "$ref": "#/$defs/curve"
+          }
+        }
+      }
+    },
+    "hex8": {
+      "type": "string",
+      "pattern": "^[0-9A-F]{2}$"
+    },
+    "int8": {
+      "type": "integer",
+      "minimum": -128,
+      "maximum": 127
+    },
+    "uint16": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "uint32": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 31536000,
+      "description": "Seconds after the server starts (default 0)"
+    },
+    "activePower": {
+      "type": "object",
+      "description": "ActivePower: value x 10^multiplier W",
+      "required": [
+        "value",
+        "multiplier"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "integer",
+          "minimum": -32768,
+          "maximum": 32767
+        },
+        "multiplier": {
+          "type": "integer",
+          "minimum": -9,
+          "maximum": 9
+        }
+      }
+    },
+    "realEnergy": {
+      "type": "object",
+      "description": "SignedRealEnergy: value x 10^multiplier Wh",
+      "required": [
+        "value",
+        "multiplier"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "integer",
+          "minimum": -140737488355328,
+          "maximum": 140737488355328
+        },
+        "multiplier": {
+          "type": "integer",
+          "minimum": -9,
+          "maximum": 9
+        }
+      }
+    },
+    "curve": {
+      "type": "object",
+      "description": "A DERCurve",
+      "required": [
+        "mRID",
+        "description",
+        "curveType",
+        "points"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mRID": {
+          "$ref": "#/$defs/mrid"
+        },
+        "description": {
+          "$ref": "#/$defs/string32"
+        },
+        "curveType": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "DERCurveType, e.g. 11 opModVoltVar, 12 opModVoltWatt"
+        },
+        "xMultiplier": {
+          "type": "integer",
+          "minimum": -9,
+          "maximum": 9,
+          "description": "default 0"
+        },
+        "yMultiplier": {
+          "type": "integer",
+          "minimum": -9,
+          "maximum": 9,
+          "description": "default 0"
+        },
+        "yRefType": {
+          "$ref": "#/$defs/uint8",
+          "description": "DERUnitRefType, default 0"
+        },
+        "points": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "required": [
+              "x",
+              "y"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "x": {
+                "type": "integer",
+                "minimum": -2147483648,
+                "maximum": 2147483647
+              },
+              "y": {
+                "type": "integer",
+                "minimum": -2147483648,
+                "maximum": 2147483647
+              }
+            }
+          }
+        }
+      }
+    },
+    "tariff": {
+      "type": "object",
+      "description": "A TariffProfile",
+      "required": [
+        "mRID",
+        "description",
+        "currency",
+        "pricePowerOfTenMultiplier",
+        "primacy",
+        "rateComponents"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mRID": {
+          "$ref": "#/$defs/mrid"
+        },
+        "description": {
+          "$ref": "#/$defs/string32"
+        },
+        "currency": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 999,
+          "description": "ISO 4217 numeric code, e.g. 36 AUD, 840 USD"
+        },
+        "pricePowerOfTenMultiplier": {
+          "type": "integer",
+          "minimum": -9,
+          "maximum": 9
+        },
+        "primacy": {
+          "$ref": "#/$defs/uint8"
+        },
+        "rateCode": {
+          "type": "string",
+          "maxLength": 20
+        },
+        "rateComponents": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "mRID",
+              "description",
+              "roleFlags",
+              "timeTariffIntervals"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "mRID": {
+                "$ref": "#/$defs/mrid"
+              },
+              "description": {
+                "$ref": "#/$defs/string32"
+              },
+              "roleFlags": {
+                "type": "string",
+                "pattern": "^[0-9A-F]{4}$",
+                "description": "RoleFlagsType bitmap"
+              },
+              "flowDirection": {
+                "$ref": "#/$defs/uint8",
+                "description": "of the ReadingType: 1 forward (import), 19 reverse (export)"
+              },
+              "timeTariffIntervals": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "mRID",
+                    "description",
+                    "duration",
+                    "price"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "mRID": {
+                      "$ref": "#/$defs/mrid"
+                    },
+                    "description": {
+                      "$ref": "#/$defs/string32"
+                    },
+                    "start": {
+                      "$ref": "#/$defs/offset"
+                    },
+                    "duration": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 4294967295
+                    },
+                    "price": {
+                      "type": "integer",
+                      "minimum": -2147483648,
+                      "maximum": 2147483647,
+                      "description": "The price of its ConsumptionTariffInterval, in units of 10^pricePowerOfTenMultiplier of the currency per kWh"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "messagingProgram": {
+      "type": "object",
+      "description": "A MessagingProgram",
+      "required": [
+        "mRID",
+        "description",
+        "locale",
+        "primacy",
+        "textMessages"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mRID": {
+          "$ref": "#/$defs/mrid"
+        },
+        "description": {
+          "$ref": "#/$defs/string32"
+        },
+        "locale": {
+          "type": "string",
+          "maxLength": 42,
+          "description": "RFC 4646 locale, e.g. en-US"
+        },
+        "primacy": {
+          "$ref": "#/$defs/uint8"
+        },
+        "textMessages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "mRID",
+              "description",
+              "originator",
+              "priority",
+              "textMessage",
+              "duration"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "mRID": {
+                "$ref": "#/$defs/mrid"
+              },
+              "description": {
+                "$ref": "#/$defs/string32"
+              },
+              "originator": {
+                "type": "string",
+                "maxLength": 20
+              },
+              "priority": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3
+              },
+              "textMessage": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "start": {
+                "$ref": "#/$defs/offset"
+              },
+              "duration": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4294967295
+              }
+            }
+          }
+        }
+      }
+    },
+    "der": {
+      "type": "object",
+      "description": "What put-der PUTs for the device's DER",
+      "required": [
+        "capability",
+        "settings",
+        "status",
+        "availability"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "capability": {
+          "type": "object",
+          "required": [
+            "modesSupported",
+            "rtgMaxW",
+            "type"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "modesSupported": {
+              "$ref": "#/$defs/hex32",
+              "description": "DERControlType bitmap"
+            },
+            "rtgMaxW": {
+              "$ref": "#/$defs/activePower"
+            },
+            "type": {
+              "$ref": "#/$defs/uint8",
+              "description": "DERType, e.g. 4 PV"
+            },
+            "doeModesSupported": {
+              "$ref": "#/$defs/hex8",
+              "description": "CSIP-AUS DOEModesSupported bitmap (csipaus namespace), which CSIP-AUS servers require"
+            }
+          }
+        },
+        "settings": {
+          "type": "object",
+          "required": [
+            "modesEnabled",
+            "setMaxW",
+            "setGradW"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "modesEnabled": {
+              "$ref": "#/$defs/hex32"
+            },
+            "setMaxW": {
+              "$ref": "#/$defs/activePower"
+            },
+            "setGradW": {
+              "$ref": "#/$defs/uint16",
+              "description": "hundredths of a percent of setMaxW per second"
+            },
+            "doeModesEnabled": {
+              "$ref": "#/$defs/hex8",
+              "description": "CSIP-AUS DOEModesEnabled bitmap (csipaus namespace)"
+            }
+          }
+        },
+        "status": {
+          "type": "object",
+          "required": [
+            "genConnectStatus",
+            "operationalModeStatus"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "genConnectStatus": {
+              "$ref": "#/$defs/hex8",
+              "description": "ConnectStatusType bitmap"
+            },
+            "operationalModeStatus": {
+              "$ref": "#/$defs/uint8"
+            }
+          }
+        },
+        "availability": {
+          "type": "object",
+          "required": [
+            "availabilityDuration",
+            "statWAvail"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "availabilityDuration": {
+              "$ref": "#/$defs/uint32",
+              "description": "seconds"
+            },
+            "statWAvail": {
+              "$ref": "#/$defs/activePower"
+            }
+          }
+        }
+      }
+    },
+    "logEvent": {
+      "type": "object",
+      "description": "The LogEvent log-event POSTs",
+      "required": [
+        "logEventCode",
+        "logEventID",
+        "logEventPEN",
+        "functionSet",
+        "profileID",
+        "details"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "logEventCode": {
+          "$ref": "#/$defs/uint8"
+        },
+        "logEventID": {
+          "$ref": "#/$defs/uint16"
+        },
+        "logEventPEN": {
+          "$ref": "#/$defs/uint32"
+        },
+        "functionSet": {
+          "$ref": "#/$defs/uint8"
+        },
+        "profileID": {
+          "$ref": "#/$defs/uint8"
+        },
+        "details": {
+          "type": "string",
+          "maxLength": 32
+        }
+      }
+    },
+    "flowReservation": {
+      "type": "object",
+      "description": "The FlowReservationRequest flow-reservation POSTs",
+      "required": [
+        "mRID",
+        "description",
+        "energyRequested",
+        "powerRequested",
+        "start",
+        "duration"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mRID": {
+          "$ref": "#/$defs/mrid"
+        },
+        "description": {
+          "$ref": "#/$defs/string32"
+        },
+        "energyRequested": {
+          "$ref": "#/$defs/realEnergy"
+        },
+        "powerRequested": {
+          "$ref": "#/$defs/activePower"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31536000,
+          "description": "Seconds after the request at which the interval starts"
+        },
+        "duration": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "durationRequested": {
+          "$ref": "#/$defs/uint16",
+          "description": "seconds"
         }
       }
     }

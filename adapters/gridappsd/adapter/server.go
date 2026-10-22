@@ -9,6 +9,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
@@ -35,7 +36,7 @@ import (
 
 // adminFunctions are the DERControlBase elements the sep2server admin API
 // takes in a control's functions.
-var adminFunctions = map[string]bool{"opModConnect": true, "opModEnergize": true, "opModMaxLimW": true}
+var adminFunctions = map[string]bool{"opModConnect": true, "opModEnergize": true, "opModMaxLimW": true, "opModFixedW": true}
 
 // provisionedDevice is a device the server provisions from --tls-dir/devices.
 type provisionedDevice struct {
@@ -79,6 +80,7 @@ func runServer(args []string) error {
 		return err
 	}
 	readyFile := fs.get("ready-file", defaultReady)
+	controlSocket := fs.get("control-socket", defaultControlSocket)
 
 	adminPort, err := freePort()
 	if err != nil {
@@ -102,6 +104,13 @@ func runServer(args []string) error {
 	if err := writeThrowawayCA(mintDir); err != nil {
 		return fmt.Errorf("throwaway serving CA: %w", err)
 	}
+	// The traffic capture is how the adapter sees registrations and
+	// subscriptions: sep2server logs neither.
+	trafficDir, err := os.MkdirTemp("", "sep2-traffic-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(trafficDir)
 
 	cmd := exec.Command(sep2serverBinary, "serve")
 	cmd.Env = append(os.Environ(),
@@ -114,6 +123,12 @@ func runServer(args []string) error {
 		fmt.Sprintf("SEP2_ADMIN_LISTEN=127.0.0.1:%d", adminPort),
 		"SEP2_ADMIN_KEY="+admin.key,
 		"SEP2_NOTIFICATION_ALLOW_LOOPBACK=true",
+		"SEP2_TRAFFIC_CAPTURE=true",
+		"SEP2_TRAFFIC_DIR="+trafficDir,
+		// sep2server delivers notifications with Go's standard client,
+		// which verifies the listener against the system roots: make the
+		// test CA the root it trusts.
+		"SSL_CERT_FILE="+filepath.Join(tlsDir, "ca.crt"),
 		// The IEEE 2030.5 test PEN: sep2server issues no control without a PEN.
 		"SEP2_PEN=40732",
 		"HOME=/tmp",
@@ -161,14 +176,23 @@ func runServer(args []string) error {
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	var seeded []seededDevice
 	err = waitListening(ctx, fmt.Sprintf("127.0.0.1:%d", adminPort))
 	if err == nil {
-		err = provision(ctx, admin, fixture, devices)
+		err = watchTraffic(ctx, admin)
+	}
+	if err == nil {
+		seeded, err = provision(ctx, admin, fixture, devices)
 	}
 	cancel()
 	if err != nil {
 		return stop(exitFailed, fmt.Errorf("provisioning sep2server: %w", err))
 	}
+	ctl, err := listenControl(controlSocket, &controller{admin: admin, fixture: fixture, devices: seeded})
+	if err != nil {
+		return stop(exitFailed, fmt.Errorf("control socket: %w", err))
+	}
+	defer ctl.Close()
 	for _, d := range devices {
 		emit(map[string]any{"event": "device-provisioned", "sfdi": d.SFDI, "lfdi": d.LFDI})
 	}
@@ -187,31 +211,94 @@ func runServer(args []string) error {
 	}
 }
 
+// checkServerFixture refuses (exit 5) what the sep2server admin API cannot
+// seed: tariffs, messages, CSIP-AUS limits, curves, control functions
+// outside its catalog, and programs or controls outside its limits.
 func checkServerFixture(f *Fixture) error {
-	if len(f.DERPrograms) != 1 {
-		return codedError{exitUnsupported, fmt.Errorf("the %s server provisions one DER program per device; the fixture has %d", adapterName, len(f.DERPrograms))}
+	unsupported := func(format string, a ...any) error {
+		return codedError{exitUnsupported, fmt.Errorf("the %s server cannot seed the fixture %s: %s", adapterName, f.Name, fmt.Sprintf(format, a...))}
 	}
-	p := f.DERPrograms[0]
-	check := func(c *Control) error {
-		for name := range c.Base {
-			if !adminFunctions[name] {
-				return codedError{exitUnsupported, fmt.Errorf("the %s server cannot issue the DERControlBase element %s", adapterName, name)}
+	if len(f.Tariffs) > 0 {
+		return unsupported("tariffs: sep2server has no pricing function set and no admin route to seed one")
+	}
+	if len(f.Messages) > 0 {
+		return unsupported("messages: the sep2server admin API has no route to seed MessagingPrograms")
+	}
+	for _, p := range f.DERPrograms {
+		if !validAdminText(p.Description) {
+			return unsupported("program description %q is not 1 to 32 printable ASCII characters", p.Description)
+		}
+		if !validPrimacy(int(p.Primacy)) {
+			return unsupported("program %q has primacy %d; the admin API takes 0, 1, 2 or 65 to 191", p.Description, p.Primacy)
+		}
+		if len(p.Curves) > 0 {
+			return unsupported("program %q has curves: %s", p.Description, curvesUnsupported)
+		}
+		if p.DefaultControl != nil {
+			if err := checkBase(p.DefaultControl.Base); err != nil {
+				return unsupported("default control of %q: %v", p.Description, err)
 			}
 		}
-		return nil
-	}
-	if p.DefaultControl != nil {
-		if err := check(p.DefaultControl); err != nil {
-			return err
-		}
-	}
-	for i := range p.Controls {
-		if err := check(&p.Controls[i]); err != nil {
-			return err
+		for _, c := range p.Controls {
+			if err := checkBase(c.Base); err != nil {
+				return unsupported("control %q of %q: %v", c.Description, p.Description, err)
+			}
+			if err := checkSchedule(c.Duration, c.Start); err != nil {
+				return unsupported("control %q of %q: %v", c.Description, p.Description, err)
+			}
 		}
 	}
 	return nil
 }
+
+// curvesUnsupported says why the server refuses curves.
+const curvesUnsupported = "sep2server stores curves only from its boot fixture and serves them only as the list GET /dc " +
+	"(pkg/sep2srv/assembly/assembly.go:1049); a control's curve link /dc/{id} is not served, and an admin-created program has no DERCurveListLink"
+
+// checkBase refuses DERControlBase elements the admin API does not issue.
+func checkBase(base map[string]json.RawMessage) error {
+	for name := range base {
+		if !adminFunctions[name] {
+			return fmt.Errorf("the admin API does not issue the DERControlBase element %s", name)
+		}
+	}
+	return nil
+}
+
+// Limits of POST /api/der/controls (internal/handler/admin_dercontrol.go).
+const (
+	minControlDuration = 60
+	maxControlDuration = 24 * 3600
+	maxControlAhead    = 7 * 24 * 3600
+)
+
+func checkSchedule(duration, start uint32) error {
+	if duration < minControlDuration || duration > maxControlDuration {
+		return fmt.Errorf("duration %d s is outside the admin API's 60 s to 24 h", duration)
+	}
+	if start > maxControlAhead {
+		return fmt.Errorf("start %d s is more than the admin API's 7 days ahead", start)
+	}
+	return nil
+}
+
+// validAdminText is the admin API's description rule: 1 to 32 printable
+// ASCII characters.
+func validAdminText(s string) bool {
+	if len(s) == 0 || len(s) > 32 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+// validPrimacy is the admin API's primacy rule: the defined values 0 to 2
+// or the user range 65 to 191.
+func validPrimacy(p int) bool { return (p >= 0 && p <= 2) || (p >= 65 && p <= 191) }
 
 // loadDevices reads the device certificates the server provisions.
 func loadDevices(dir string) ([]provisionedDevice, error) {
@@ -364,11 +451,31 @@ func (a *adminClient) call(ctx context.Context, method, path string, body any, o
 	return nil
 }
 
-// provision creates each device with the fixture's PIN, then its DER
-// program, default control and controls.
-func provision(ctx context.Context, a *adminClient, f *Fixture, devices []provisionedDevice) error {
-	program := f.DERPrograms[0]
+// seededDevice is what provision created for one device.
+type seededDevice struct {
+	provisionedDevice
+	ID       string            // the EndDevice id, /edev/{ID}
+	Programs map[string]string // program href by description
+}
+
+// provision creates each device with the fixture's PIN, assigns it one FSA,
+// and creates the fixture's programs under it with their default controls
+// and controls.
+func provision(ctx context.Context, a *adminClient, f *Fixture, devices []provisionedDevice) ([]seededDevice, error) {
 	now := time.Now().Unix()
+	var fsa struct {
+		Href string `json:"href"`
+	}
+	// The admin API takes the mRID as the FSA's id, and serves it as the
+	// mRID: give it a valid mRIDType (32 hex digits), not its own default
+	// "fsa-<hex>" id.
+	sum := sha256.Sum256([]byte("ieee20305-interop FSA " + f.Name))
+	fsaMRID := strings.ToUpper(hex.EncodeToString(sum[:16]))
+	if err := a.call(ctx, http.MethodPost, "/api/fsas", map[string]any{"description": "ieee20305-interop", "primacy": 0, "mRID": fsaMRID}, &fsa); err != nil {
+		return nil, err
+	}
+	fsaID := fsa.Href[strings.LastIndexByte(fsa.Href, '/')+1:]
+	var out []seededDevice
 	for _, d := range devices {
 		var created struct {
 			Href string `json:"href"`
@@ -377,61 +484,70 @@ func provision(ctx context.Context, a *adminClient, f *Fixture, devices []provis
 			"sfdi": d.SFDI, "lfdi": d.LFDI, "pin": f.Device.PIN, "enabled": true,
 		}, &created)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		id := strings.TrimPrefix(created.Href, "/edev/")
-		var programHref string
-		issue := func(body map[string]any) error {
-			var reply struct {
-				Program json.RawMessage `json:"program"`
+		sd := seededDevice{provisionedDevice: d, ID: strings.TrimPrefix(created.Href, "/edev/"), Programs: map[string]string{}}
+		if err := a.call(ctx, http.MethodPost, "/api/devices/"+sd.ID+"/fsa-assignment", map[string]any{"fsaHref": fsa.Href}, nil); err != nil {
+			return nil, err
+		}
+		for _, p := range f.DERPrograms {
+			// The admin API creates a program only with a default control;
+			// one the fixture does not have is cleared right after.
+			def := map[string]json.RawMessage{"opModConnect": json.RawMessage("true")}
+			if p.DefaultControl != nil {
+				def = p.DefaultControl.Base
 			}
-			if err := a.call(ctx, http.MethodPost, "/api/devices/"+id+"/controls", body, &reply); err != nil {
-				return err
+			var prog struct {
+				ID   string `json:"id"`
+				Href string `json:"href"`
 			}
-			if programHref == "" {
-				programHref = hrefOf(reply.Program)
+			err := a.call(ctx, http.MethodPost, "/api/devices/"+sd.ID+"/fsas/"+fsaID+"/der-programs", map[string]any{
+				"description": p.Description, "primacy": p.Primacy, "mRID": p.MRID,
+				"defaultControl": map[string]any{"functions": def},
+			}, &prog)
+			if err != nil {
+				return nil, err
 			}
-			return nil
-		}
-		if c := program.DefaultControl; c != nil {
-			if err := issue(map[string]any{"kind": "default", "functions": c.Base}); err != nil {
-				return err
+			if p.DefaultControl == nil {
+				err := a.call(ctx, http.MethodPut, "/api/devices/"+sd.ID+"/der-programs/"+prog.ID, map[string]any{
+					"description": p.Description, "primacy": p.Primacy, "defaultControl": nil,
+				}, nil)
+				if err != nil {
+					return nil, err
+				}
+			}
+			sd.Programs[p.Description] = prog.Href
+			for _, c := range p.Controls {
+				var start *int64
+				if c.Start > 0 {
+					t := now + int64(c.Start)
+					start = &t
+				}
+				if _, err := issueControl(ctx, a, prog.Href, c.Base, c.Duration, start, c.Description); err != nil {
+					return nil, err
+				}
 			}
 		}
-		for _, c := range program.Controls {
-			if err := issue(map[string]any{
-				"kind": "scheduled", "functions": c.Base, "durationSeconds": c.Duration, "description": c.Description,
-				"startTime": now + int64(c.Start),
-			}); err != nil {
-				return err
-			}
-		}
-		if programHref == "" {
-			continue
-		}
-		derpID := programHref[strings.LastIndexByte(programHref, '/')+1:]
-		err = a.call(ctx, http.MethodPut, "/api/devices/"+id+"/der-programs/"+derpID, map[string]any{
-			"description": program.Description, "primacy": program.Primacy,
-		}, nil)
-		if err != nil {
-			return err
-		}
+		out = append(out, sd)
 	}
-	return nil
+	return out, nil
 }
 
-// hrefOf returns the href of a program in an admin reply, which is either
-// an object with an href or the href itself.
-func hrefOf(raw json.RawMessage) string {
-	var obj struct {
-		Href string `json:"href"`
+// issueControl issues a DERControl to a program through the admin API.
+// A nil start starts it now.
+func issueControl(ctx context.Context, a *adminClient, programHref string, base map[string]json.RawMessage, duration uint32, start *int64, description string) (map[string]any, error) {
+	body := map[string]any{
+		"derProgramHref": programHref, "functions": base, "durationSeconds": duration,
 	}
-	if json.Unmarshal(raw, &obj) == nil && obj.Href != "" {
-		return obj.Href
+	if description != "" {
+		body["description"] = description
 	}
-	var s string
-	if json.Unmarshal(raw, &s) == nil {
-		return s
+	if start != nil {
+		body["startTime"] = *start
 	}
-	return ""
+	var created map[string]any
+	if err := a.call(ctx, http.MethodPost, "/api/der/controls", body, &created); err != nil {
+		return nil, err
+	}
+	return created, nil
 }

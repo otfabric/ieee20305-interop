@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: MIT
 """ieee20305-interop adapter for py20305, the DER Security IEEE 2030.5 client.
 
-Drives the py20305 protocol engine (CsipClient, its discovery and its
-models) behind the commands of docs/CONTAINER_CONTRACT.md. py20305 is a
-client only: the server command validates its flags and exits 5.
+Drives the py20305 protocol engine (CsipClient, its discovery, its HTTP
+client, its notification listener and its models) behind the commands of
+docs/CONTAINER_CONTRACT.md. py20305 is a client only: the server command
+validates its flags and exits 5, and call answers unsupported.
 """
 
 from __future__ import annotations
@@ -12,10 +13,12 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import ssl
 import sys
 import time
 from dataclasses import dataclass, field
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -23,11 +26,40 @@ from urllib.parse import urlsplit
 EXIT_OK, EXIT_FAILED, EXIT_USAGE, EXIT_CONNECT, EXIT_FIXTURE, EXIT_UNSUPPORTED = 0, 1, 2, 3, 4, 5
 
 ADAPTER = "py20305"
-CONTRACT_VERSION = "0.2"
+CONTRACT_VERSION = "0.3"
 EDITIONS = ("2018", "2023")
-OPERATIONS = ("register", "discover", "poll-controls", "report")
+# Every client operation of the contract; the adapter performs all but these.
+CLIENT_OPERATIONS = ("register", "discover", "poll-controls", "report", "subscribe", "respond", "log-event",
+                     "put-der", "flow-reservation", "poll-pricing")
+NOT_IMPLEMENTED = {
+    "flow-reservation": "py20305 has no flow reservation client logic (no FlowReservationRequest is ever built or "
+                        "POSTed by its engine), so the adapter does not perform flow-reservation",
+}
+# What the self-tests exercise and pass, per IEEE 2030.5 version (R4.2): the
+# GridAPPS-D server serves 2018 and 2023 (baseline only), Envoy 2018
+# (baseline and csip-aus). put-der and poll-pricing are performed against
+# Envoy, the only server that serves them, where upstream defects make them
+# fail (tests/known-bugs.tsv); curves (csip) are checked, but no server of
+# the self-tests serves the csip fixture, so it is not declared.
+DECLARED_OPERATIONS = ["register", "discover", "poll-controls", "report", "subscribe", "respond", "log-event"]
+DECLARED = {
+    "2018": {
+        "operations": DECLARED_OPERATIONS + ["put-der", "poll-pricing"],
+        "fixtures": ["baseline", "csip", "csip-aus"],
+        "features": {"csipAus": True, "subscription": True, "defaultControl": True, "curves": False,
+                     "pricing": False},
+    },
+    "2023": {
+        "operations": DECLARED_OPERATIONS,
+        "fixtures": ["baseline", "csip"],
+        "features": {"csipAus": False, "subscription": True, "defaultControl": True, "curves": False,
+                     "pricing": False},
+    },
+}
+CALLS = ("issue-control",)
 FIXTURES = Path("/fixtures")
 DEFAULT_FIXTURE = FIXTURES / "baseline" / "fixture.json"
+DEFAULT_NOTIFY_LISTEN = "0.0.0.0:8443"
 
 # Set by the Dockerfile.
 ADAPTER_VERSION = os.environ.get("IEEE20305_INTEROP_ADAPTER_VERSION", "dev")
@@ -37,6 +69,13 @@ UPSTREAM_REVISION = os.environ.get("IEEE20305_INTEROP_UPSTREAM_REVISION", "unkno
 # What py20305 offers (py20305.client.tls): TLS 1.2 with these suites only.
 TLS_VERSIONS = ["1.2"]
 CIPHER_SUITES = ["TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8"]
+
+# DERControlBase elements of the fixture schema, by their py20305 attribute.
+PLAIN_MODES = {"opModConnect": "op_mod_connect", "opModEnergize": "op_mod_energize",
+               "opModMaxLimW": "op_mod_max_lim_w", "opModFixedW": "op_mod_fixed_w"}
+CURVE_MODES = {"opModVoltVar": "op_mod_volt_var", "opModVoltWatt": "op_mod_volt_watt",
+               "opModFreqWatt": "op_mod_freq_watt", "opModWattPF": "op_mod_watt_pf"}
+LIMIT_MODES = ("opModExpLimW", "opModImpLimW", "opModGenLimW", "opModLoadLimW")
 
 
 class UsageError(Exception):
@@ -77,7 +116,7 @@ def main(argv: list[str]) -> int:
             required(flags, "tls-dir")
             raise CodedError(EXIT_UNSUPPORTED, "py20305 is a client only: there is no server role")
         if command == "call":
-            raise CodedError(EXIT_UNSUPPORTED, "call: the control socket is not implemented by the py20305 adapter")
+            return run_call(args)
         if command == "print-capabilities":
             if args:
                 raise UsageError("print-capabilities takes no arguments")
@@ -152,23 +191,85 @@ def millis(flags: dict[str, str], name: str, default: float) -> float:
     return value / 1000
 
 
+def host_port(value: str, flag: str, need_port: bool) -> tuple[str, int | None]:
+    """HOST:PORT (or HOST alone when the port is optional); [v6]:port is accepted."""
+    host, port = value, None
+    if value.startswith("["):
+        end = value.find("]")
+        if end < 0:
+            raise UsageError(f"--{flag} {value!r} is not host:port")
+        host, rest = value[1:end], value[end + 1:]
+        if rest:
+            if not rest.startswith(":"):
+                raise UsageError(f"--{flag} {value!r} is not host:port")
+            port = rest[1:]
+    elif ":" in value:
+        host, port = value.rsplit(":", 1)
+    if not host or any(c in host for c in "/ ?#@"):
+        raise UsageError(f"--{flag} {value!r} has no valid host")
+    if port is None:
+        if need_port:
+            raise UsageError(f"--{flag} {value!r} is not host:port")
+        return host, None
+    if not port.isdigit() or not 0 < int(port) < 65536:
+        raise UsageError(f"--{flag} {value!r} has no valid port")
+    return host, int(port)
+
+
 # ---- capabilities and fixtures ----
 
 
 def capabilities() -> dict[str, Any]:
-    notes = [
+    common_notes = [
         "TLS: TLS 1.2 with TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384 and TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8, "
-        "through Python's ssl module (OpenSSL), as py20305 configures it.",
-        "Client only: py20305 has no server role.",
+        "through Python's ssl module (OpenSSL), as py20305 configures it (client/tls.py). The notification "
+        "listener offers the same suites (subscription/notification_server.py:_create_server_ssl_context).",
+        "Client only: py20305 has no server role, and no control socket, so call is unsupported.",
         "Verifies the server's host name against its certificate (TlsConfig.check_hostname, on by default), "
         "so a server certificate must name the host the client connects to.",
-        "Operations run on the py20305 protocol engine: CsipClient discovery and registration, "
-        "and its IEEE 2030.5 models for the MirrorUsagePoint.",
-        "Subscriptions and the control socket are not implemented by this adapter yet.",
+        "Operations run on the py20305 protocol engine: CsipClient discovery (DER programs, default controls, "
+        "controls, curves, tariffs), Sep2Client for every request, py20305's IEEE 2030.5 models for what it "
+        "sends, csipaus.elements.doe_limits for the CSIP-AUS limits, and NotificationServer for subscribe.",
+        "subscribe: py20305's NotificationServer serves POST /notify with notify.crt and notify.key of --tls-dir "
+        "(the device certificate when they are absent), and accepts a server that presents no client "
+        "certificate (client_cert_mode warn).",
+        "respond, log-event and the subscription are POSTed with Sep2Client.post directly, not through "
+        "post_der_response or SubscriptionManager.subscribe, which log a refusal instead of raising it "
+        "(events/response.py post_der_response, subscription/manager.py subscribe).",
+        "put-der sends the fixture's der, with its CSIP-AUS doeModesSupported and doeModesEnabled when it has "
+        "them, as py20305's csipaus models (models/csipaus/csipaus_ext.py) in py20305's CSIP-AUS mode.",
+        "flow-reservation is unsupported (exit 5): py20305 v0.16.0 has no flow reservation client logic.",
+        "Messages (MessagingProgram) are not read: no contract operation reads them.",
+        "put-der (2018) fails against Envoy, a known issue: py20305 writes the CSIP-AUS extensions in the namespace "
+        "https://csipaus.org/ns (models/csipaus/csipaus_ext.py:12, xml/serialization.py:39), Envoy reads only "
+        "https://csipaus.org/ns/v1.3 (envoy_schema 2.7.0 server/schema/sep2/base.py:8) and answers the "
+        "DERCapability PUT with 400, doeModesSupported missing (with the v1.3 namespace Envoy accepts all four "
+        "PUTs); GridAPPS-D serves no DERList.",
+        "poll-pricing (2018) fails against Envoy, a known issue: CSIP-AUS 1.3 (csipaus-core-v1.3.xsd) extends "
+        "TimeTariffInterval with a mandatory RateComponentLink in the IEEE 2030.5 namespace, which Envoy serves "
+        "(src/envoy/server/mapper/sep2/pricing.py:373); py20305 does not model it, and its parser, which has no lenient option "
+        "(xml/serialization.py from_xml), rejects the TimeTariffIntervalList "
+        "(discovery.py _discover_rate_component skips it), so no interval is found; GridAPPS-D serves no "
+        "tariffs.",
+        "Curves are checked, but not declared: no server of the self-tests serves curves (GridAPPS-D cannot "
+        "seed them, Envoy serves none), so no baked fixture has them.",
     ]
-    role_client = {"supported": True, "operations": list(OPERATIONS)}
-    role_server = {"supported": False, "operations": []}
-    features = {"mTLS": True, "csip": True, "csipAus": False, "subscription": False}
+    by_edition = {
+        "2018": ["--version 2018 sets py20305's server_2018_compat: DERStatus carries genConnectStatus, a "
+                 "DERControlResponse no modesResponded, and root elements no schema attributes."],
+        "2023": ["Against GridAPPS-D, the only 2023 server of the self-tests: the baseline and csip fixtures; "
+                 "no CSIP-AUS is exercised."],
+    }
+    versions = {}
+    for edition in EDITIONS:
+        declared = DECLARED[edition]
+        versions[edition] = {
+            "client": {"supported": True, "operations": declared["operations"], "fixtures": declared["fixtures"]},
+            "server": {"supported": False, "operations": []},
+            "features": {"mTLS": True, "csip": True, "messaging": False, "flowReservation": False,
+                         **declared["features"]},
+            "notes": common_notes + by_edition[edition],
+        }
     return {
         "schemaVersion": "1.0",
         "adapter": ADAPTER,
@@ -184,10 +285,7 @@ def capabilities() -> dict[str, Any]:
             "independentEngine": True,
         },
         "tls": {"versions": TLS_VERSIONS, "cipherSuites": CIPHER_SUITES},
-        "versions": {
-            edition: {"client": role_client, "server": role_server, "features": features, "notes": notes}
-            for edition in EDITIONS
-        },
+        "versions": versions,
     }
 
 
@@ -215,6 +313,9 @@ class Fixture:
     device_category: int
     der_programs: list[dict[str, Any]] = field(default_factory=list)
     report: dict[str, Any] = field(default_factory=dict)
+    der: dict[str, Any] | None = None
+    log_event: dict[str, Any] | None = None
+    tariffs: list[dict[str, Any]] = field(default_factory=list)
 
 
 def load_fixture(path: str) -> Fixture:
@@ -229,13 +330,61 @@ def load_fixture(path: str) -> Fixture:
             device_category=int(device["deviceCategory"], 16),
             der_programs=list(doc["derPrograms"]),
             report=dict(doc["report"]),
+            der=doc.get("der"),
+            log_event=doc.get("logEvent"),
+            tariffs=list(doc.get("tariffs", [])),
         )
         for program in fixture.der_programs:
-            program["description"], [c["description"] for c in program["controls"]]
+            curves = {c["mRID"]: c for c in program.get("curves", [])}
+            for curve in curves.values():
+                curve["curveType"], [(p["x"], p["y"]) for p in curve["points"]]
+            bases = [c["base"] for c in program["controls"]] + (
+                [program["defaultControl"]["base"]] if "defaultControl" in program else [])
+            program["description"], [c["duration"] for c in program["controls"]]
+            for base in bases:
+                for name in base:
+                    if name in CURVE_MODES and base[name] not in curves:
+                        raise ValueError(f"{name} names {base[name]}, not a curve of {program['description']!r}")
+                    if name in LIMIT_MODES:
+                        base[name]["value"], base[name]["multiplier"]
         fixture.report["mirrorUsagePoint"]["mRID"], fixture.report["meterReadings"][0]["readingType"]
+        for tariff in fixture.tariffs:
+            tariff["description"], tariff["currency"], tariff["pricePowerOfTenMultiplier"]
+            for rc in tariff["rateComponents"]:
+                rc["description"], [(i["duration"], i["price"]) for i in rc["timeTariffIntervals"]]
     except (OSError, ValueError, KeyError, TypeError, IndexError) as exc:
         raise CodedError(EXIT_FIXTURE, f"fixture {path}: {exc!r}") from None
     return fixture
+
+
+# ---- call ----
+
+
+def run_call(args: list[str]) -> int:
+    """call <operation>: py20305 has no control socket, so every operation is unsupported."""
+    if not args or args[0].startswith("--"):
+        raise UsageError("call needs an operation: " + ", ".join(CALLS))
+    op, args = args[0], args[1:]
+    flags = parse_flags(args, "device", "payload", "timeout-ms", "control-socket")
+    millis(flags, "timeout-ms", 30.0)
+    if "payload" in flags:
+        try:
+            json.loads(flags["payload"])
+        except ValueError:
+            raise UsageError(f"--payload is not JSON: {flags['payload']!r}") from None
+    emit({
+        "schemaVersion": "1.0",
+        "adapter": ADAPTER,
+        "operation": op,
+        "ok": False,
+        "error": {"code": "unsupported",
+                  "detail": "py20305 is a one-shot client here: there is no server role and no client run, "
+                            "so there is no control socket to call"},
+        "request": None,
+        "response": None,
+        "elapsedMs": 0,
+    })
+    return EXIT_UNSUPPORTED
 
 
 # ---- client ----
@@ -248,19 +397,42 @@ class Result:
     response: dict[str, Any] | None = None
 
 
+@dataclass
+class Options:
+    edition: str
+    url: Any
+    tls_dir: Path
+    fixture: Fixture
+    connect_timeout: float
+    timeout: float
+    notify_listen: tuple[str, int]
+    notify_host: str
+
+
 def run_client(args: list[str]) -> int:
     if not args:
-        raise UsageError("client needs an operation: " + ", ".join(OPERATIONS + ("subscribe", "run")))
+        raise UsageError("client needs an operation: " + ", ".join(CLIENT_OPERATIONS + ("run",)))
     op, args = args[0], args[1:]
-    flags = parse_flags(args, "version", "url", "tls-dir", "fixture", "connect-timeout-ms", "timeout-ms", "payload")
+    flags = parse_flags(args, "version", "url", "tls-dir", "fixture", "connect-timeout-ms", "timeout-ms", "payload",
+                        "notify-listen", "notify-host", "ready-file", "control-socket")
     edition = edition_of(flags)
     url = urlsplit(required(flags, "url"))
     if url.scheme != "https" or not url.hostname:
         raise UsageError(f"--url {flags['url']!r} is not an https:// URL")
     connect_timeout = millis(flags, "connect-timeout-ms", 10.0)
     timeout = millis(flags, "timeout-ms", 30.0)
-    if op not in OPERATIONS and op not in ("subscribe", "run"):
+    if op not in CLIENT_OPERATIONS and op != "run":
         raise UsageError(f"unknown client operation {op!r}")
+    if op != "run" and ("ready-file" in flags or "control-socket" in flags):
+        raise UsageError("--ready-file and --control-socket are for client run")
+    if "payload" in flags:
+        try:
+            json.loads(flags["payload"])
+        except ValueError:
+            raise UsageError(f"--payload is not JSON: {flags['payload']!r}") from None
+    listen_host, listen_port = host_port(flags.get("notify-listen", DEFAULT_NOTIFY_LISTEN), "notify-listen", True)
+    notify_host, notify_port = host_port(flags.get("notify-host", socket.gethostname()), "notify-host", False)
+    notify_authority = flags.get("notify-host", "") if notify_port is not None else f"{notify_host}:{listen_port}"
     tls_dir = Path(required(flags, "tls-dir"))
     fixture = load_fixture(flags.get("fixture", str(DEFAULT_FIXTURE)))
     if op == "run":
@@ -268,19 +440,21 @@ def run_client(args: list[str]) -> int:
     for name in ("client.crt", "client.key", "ca.crt"):
         if not (tls_dir / name).is_file():
             raise CodedError(EXIT_FIXTURE, f"--tls-dir {tls_dir} has no {name}")
+    options = Options(edition, url, tls_dir, fixture, connect_timeout, timeout, (listen_host, listen_port),
+                      notify_authority)
 
     result = Result(operation=op)
     start = time.monotonic()
     error: dict[str, str] | None = None
     code = EXIT_OK
-    if op == "subscribe":
-        error, code = {"code": "unsupported", "detail": "subscriptions are not implemented by the py20305 adapter"}, EXIT_UNSUPPORTED
+    if op in NOT_IMPLEMENTED:
+        error, code = {"code": "unsupported", "detail": NOT_IMPLEMENTED[op]}, EXIT_UNSUPPORTED
     else:
         try:
-            asyncio.run(perform(op, edition, url, tls_dir, fixture, connect_timeout, timeout, result))
+            asyncio.run(perform(op, options, result))
         except OperationError as exc:
             error = {"code": exc.code, "detail": str(exc)}
-            code = EXIT_CONNECT if exc.code == "connect-failed" else EXIT_FAILED
+            code = {"connect-failed": EXIT_CONNECT, "unsupported": EXIT_UNSUPPORTED}.get(exc.code, EXIT_FAILED)
         except CodedError as exc:
             error, code = {"code": "invalid-request", "detail": str(exc)}, exc.code
     emit({
@@ -297,13 +471,31 @@ def run_client(args: list[str]) -> int:
     return code
 
 
-async def perform(op: str, edition: str, url: Any, tls_dir: Path, fixture: Fixture,
-                  connect_timeout: float, timeout: float, result: Result) -> None:
+def status_recorder() -> Any:
+    """A py20305 TrafficRecorder that remembers the status of the last write.
+
+    Sep2Client.post returns only the Location, so the status of a POST is
+    read from what py20305 records for its Live Traffic view."""
+    from py20305.client.traffic_recorder import TrafficRecorder
+
+    class StatusRecorder(TrafficRecorder):
+        last_status: int | None = None
+
+        def record_response(self, *, method: str, url: str, status: int | None = None, body: object = None,
+                            error: str | None = None) -> None:
+            self.last_status = status
+            super().record_response(method=method, url=url, status=status, body=body, error=error)
+
+    return StatusRecorder()
+
+
+async def perform(op: str, options: Options, result: Result) -> None:
     from py20305.client.csip_client import CsipClient
     from py20305.client.errors import Sep2Error, Sep2ProtocolError
     from py20305.client.retry import RetryPolicy
     from py20305.client.tls import TlsConfig, create_ssl_context
 
+    tls_dir, url = options.tls_dir, options.url
     tls = TlsConfig(client_cert=tls_dir / "client.crt", client_key=tls_dir / "client.key", ca_cert=tls_dir / "ca.crt")
     try:
         context = create_ssl_context(tls)
@@ -316,7 +508,7 @@ async def perform(op: str, edition: str, url: Any, tls_dir: Path, fixture: Fixtu
     # failure rather than an operation failure.
     try:
         _, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port, ssl=context, server_hostname=host), connect_timeout)
+            asyncio.open_connection(host, port, ssl=context, server_hostname=host), options.connect_timeout)
         writer.close()
     except (OSError, ssl.SSLError, asyncio.TimeoutError) as exc:
         raise OperationError("connect-failed", f"{type(exc).__name__}: {exc}") from None
@@ -325,20 +517,27 @@ async def perform(op: str, edition: str, url: Any, tls_dir: Path, fixture: Fixtu
         f"https://{url.netloc}",
         tls=tls,
         retry=RetryPolicy(max_transient=0, max_tls=0),
-        server_2018_compat=edition == "2018",
+        server_2018_compat=options.edition == "2018",
         dcap_path=url.path or "/dcap",
         heartbeat_enabled=False,
         reconcile_enabled=False,
+        pricing_enabled=op == "poll-pricing",
     )
-    operation = {"discover": op_discover, "register": op_register,
-                 "poll-controls": op_poll_controls, "report": op_report}[op]
+    client.http.traffic_recorder = status_recorder()
+    operation = {"discover": op_discover, "register": op_register, "poll-controls": op_poll_controls,
+                 "report": op_report, "subscribe": op_subscribe, "respond": op_respond, "log-event": op_log_event,
+                 "put-der": op_put_der, "poll-pricing": op_poll_pricing}[op]
     try:
-        await asyncio.wait_for(operation(client, fixture, result, url.path or "/dcap"), timeout)
+        await asyncio.wait_for(operation(client, options, result), options.timeout)
     except asyncio.TimeoutError:
-        raise OperationError("timeout", f"no result within {timeout:g} s") from None
+        raise OperationError("timeout", f"no result within {options.timeout:g} s") from None
     except ssl.SSLError as exc:
         raise OperationError("connect-failed", f"{type(exc).__name__}: {exc}") from None
     except Sep2ProtocolError as exc:
+        if result.response is None:
+            result.response = {"status": exc.status_code}
+        elif result.response.get("status") is None:
+            result.response["status"] = exc.status_code
         raise OperationError("server-error", f"{type(exc).__name__}: {exc}") from None
     except (Sep2Error, OSError, ValueError) as exc:
         raise OperationError("server-error", f"{type(exc).__name__}: {exc}") from None
@@ -346,9 +545,23 @@ async def perform(op: str, edition: str, url: Any, tls_dir: Path, fixture: Fixtu
         await client.http.close()
 
 
-async def op_discover(client: Any, _: Fixture, result: Result, dcap_path: str) -> None:
+def last_status(client: Any) -> int | None:
+    return client.http.traffic_recorder.last_status
+
+
+def value_of(v: Any) -> Any:
+    """The number inside a py20305 wrapper type (PerCent, PowerOfTenMultiplierType, ...)."""
+    return getattr(v, "value", v)
+
+
+def href_of(link: Any) -> str | None:
+    return getattr(link, "href", None) if link is not None else None
+
+
+async def op_discover(client: Any, options: Options, result: Result) -> None:
     from py20305.models.sep import DeviceCapability
 
+    dcap_path = options.url.path or "/dcap"
     result.request = {"method": "GET", "path": dcap_path}
     dcap = await client.http.get(dcap_path, DeviceCapability)
     links = sorted(name for name, value in vars(dcap).items() if name.endswith("_link") and value is not None)
@@ -364,9 +577,22 @@ def own_end_device(client: Any) -> Any:
     return None
 
 
-async def op_register(client: Any, fixture: Fixture, result: Result, dcap_path: str) -> None:
+async def connect(client: Any) -> Any:
+    """CsipClient discovery; returns the device's own EndDevice state."""
+    await client.connect()
+    # Discovery detects CSIP-AUS (discovery.py) but sets it on the state
+    # only, not on the HTTP client that serializes what is sent.
+    client.http.csip_aus_mode = client.state.csip_aus_mode
+    edev = own_end_device(client)
+    if edev is None:
+        raise OperationError("server-error", "the server does not list this device's EndDevice")
+    return edev
+
+
+async def op_register(client: Any, options: Options, result: Result) -> None:
     from py20305.models.sep import Registration
 
+    fixture = options.fixture
     await client.connect()
     edev = own_end_device(client)
     created = False
@@ -393,65 +619,360 @@ async def op_register(client: Any, fixture: Fixture, result: Result, dcap_path: 
                              f"the Registration has PIN {registration.p_in.value}, the device was given {fixture.pin}")
 
 
-async def op_poll_controls(client: Any, fixture: Fixture, result: Result, dcap_path: str) -> None:
-    await client.connect()
-    edev = own_end_device(client)
-    if edev is None:
-        raise OperationError("server-error", "the server does not list this device's EndDevice")
-    fsa_link = edev.device.function_set_assignments_list_link
-    result.request = {"method": "GET", "path": fsa_link.href if fsa_link else None}
-    programs = []
-    served: dict[str, list[Any]] = {}  # controls served, by program description
+# ---- DER programs, controls and curves ----
+
+
+def power(value: int, multiplier: int) -> Fraction:
+    return Fraction(value) * Fraction(10) ** multiplier
+
+
+def curve_matches(want: dict[str, Any], curve: Any) -> bool:
+    """A served DERCurve with the fixture curve's type, multipliers, yRefType and points."""
+    if curve is None:
+        return False
+    points = [(p.xvalue, p.yvalue) for p in curve.curve_data]
+    return (value_of(curve.curve_type) == want["curveType"]
+            and value_of(curve.x_multiplier) == want["xMultiplier"]
+            and value_of(curve.y_multiplier) == want["yMultiplier"]
+            and value_of(curve.y_ref_type) == want.get("yRefType", 0)
+            and points == [(p["x"], p["y"]) for p in want["points"]])
+
+
+@dataclass
+class ServedProgram:
+    """What the server serves under one program description."""
+
+    description: str
+    primacy: int | None
+    defaults: list[Any] = field(default_factory=list)  # DefaultDERControls
+    controls: list[Any] = field(default_factory=list)  # DERControls
+    curves: dict[str, Any] = field(default_factory=dict)  # DERCurves by href
+
+
+async def served_programs(client: Any) -> dict[str, ServedProgram]:
+    """The discovered programs by description, with the curves their controls link."""
+    from py20305.models.sep import Dercurve
+
+    served: dict[str, ServedProgram] = {}
     for program in client.state.der_programs.values():
-        description = program.program.description
-        controls = [c.description for c in program.der_controls]
-        served.setdefault(description, []).extend(program.der_controls)
-        programs.append({
-            "description": description,
-            "primacy": program.primacy,
-            "defaultControl": ({"description": program.default_dercontrol.description}
-                               if program.default_dercontrol else None),
-            "controls": controls,
-        })
-    result.response = {"status": 200, "body": {"derPrograms": programs}}
-    if not programs:
+        description = program.program.description or ""
+        sp = served.setdefault(description, ServedProgram(description, program.primacy))
+        if program.default_dercontrol is not None:
+            sp.defaults.append(program.default_dercontrol)
+        sp.controls.extend(program.der_controls)
+        for curve in program.der_curves:
+            if curve.href:
+                sp.curves[curve.href] = curve
+    # A curve a control links to, but that the DERCurveList did not hold.
+    for sp in served.values():
+        for base in [c.dercontrol_base for c in sp.controls + sp.defaults]:
+            for attr in CURVE_MODES.values():
+                href = href_of(getattr(base, attr, None)) if base is not None else None
+                if href and href not in sp.curves:
+                    sp.curves[href] = await client.http.get(href, Dercurve)
+    return served
+
+
+def base_matches(want: dict[str, Any], base: Any, program: dict[str, Any], sp: ServedProgram) -> bool:
+    """Whether a served DERControlBase holds exactly the fixture base's elements and values."""
+    from py20305.models.csipaus.elements import doe_limits
+
+    if base is None:
+        return False
+    got: dict[str, Any] = {name: value_of(getattr(base, attr)) for name, attr in PLAIN_MODES.items()
+                           if getattr(base, attr, None) is not None}
+    for name, attr in CURVE_MODES.items():
+        link = getattr(base, attr, None)
+        if link is not None:
+            got[name] = href_of(link)
+    for name, (value, multiplier) in doe_limits(base).items():
+        got[name] = power(value, multiplier)
+    if set(got) != set(want):
+        return False
+    curves = {c["mRID"]: c for c in program.get("curves", [])}
+    for name, wanted in want.items():
+        if name in LIMIT_MODES:
+            if got[name] != power(wanted["value"], wanted["multiplier"]):
+                return False
+        elif name in CURVE_MODES:
+            if not curve_matches(curves[wanted], sp.curves.get(got[name])):
+                return False
+        elif got[name] != wanted or type(got[name]) is not type(wanted):
+            return False
+    return True
+
+
+def control_matches(control: dict[str, Any], served: Any, program: dict[str, Any], sp: ServedProgram) -> bool:
+    """Whether a served DERControl has the fixture control's duration and DERControlBase values."""
+    interval = served.interval
+    if interval is None or interval.duration != control["duration"]:
+        return False
+    return base_matches(control["base"], served.dercontrol_base, program, sp)
+
+
+def describe_base(base: Any) -> dict[str, Any] | None:
+    """A served DERControlBase as JSON, for the result document."""
+    from py20305.models.csipaus.elements import doe_limits
+
+    if base is None:
+        return None
+    out: dict[str, Any] = {name: value_of(getattr(base, attr)) for name, attr in PLAIN_MODES.items()
+                           if getattr(base, attr, None) is not None}
+    out.update({name: href_of(getattr(base, attr)) for name, attr in CURVE_MODES.items()
+                if getattr(base, attr, None) is not None})
+    out.update({name: {"value": v, "multiplier": m} for name, (v, m) in doe_limits(base).items()})
+    return out
+
+
+def check_programs(fixture: Fixture, served: dict[str, ServedProgram]) -> None:
+    """Every program of the fixture, with its default control, controls and curves, is served."""
+    for program in fixture.der_programs:
+        name = program["description"]
+        sp = served.get(name)
+        if sp is None:
+            raise OperationError("server-error", f"the server does not serve the fixture's DER program {name!r}")
+        if "defaultControl" in program and not any(
+                base_matches(program["defaultControl"]["base"], d.dercontrol_base, program, sp) for d in sp.defaults):
+            raise OperationError("server-error", f"the server does not serve the default control "
+                                                 f"{program['defaultControl']['description']!r} of {name!r}")
+        for control in program["controls"]:
+            if not any(control_matches(control, dc, program, sp) for dc in sp.controls):
+                raise OperationError("server-error", f"the server does not serve the fixture's control "
+                                                     f"{control['description']!r} of {name!r}")
+        for curve in program.get("curves", []):
+            if not any(curve_matches(curve, c) for c in sp.curves.values()):
+                raise OperationError("server-error", f"the server does not serve the fixture's curve "
+                                                     f"{curve['description']!r} of {name!r}")
+
+
+async def op_poll_controls(client: Any, options: Options, result: Result) -> None:
+    edev = await connect(client)
+    fsa_link = edev.device.function_set_assignments_list_link
+    result.request = {"method": "GET", "path": href_of(fsa_link)}
+    served = await served_programs(client)
+    result.response = {"status": 200, "body": {"derPrograms": [{
+        "description": sp.description,
+        "primacy": sp.primacy,
+        "defaultControls": [describe_base(d.dercontrol_base) for d in sp.defaults],
+        "controls": [{"description": c.description, "duration": c.interval.duration if c.interval else None,
+                      "base": describe_base(c.dercontrol_base)} for c in sp.controls],
+        "curves": [{"href": href, "curveType": value_of(c.curve_type)} for href, c in sp.curves.items()],
+    } for sp in served.values()]}}
+    if not served:
         raise OperationError("server-error", "the device's function set assignments hold no DER program")
     # The server was seeded with the fixture's programs and controls. A server
     # picks its own mRIDs and may describe controls its own way, so programs
     # are matched by description and controls by what they do.
-    for program in fixture.der_programs:
-        if program["description"] not in served:
-            raise OperationError("server-error", f"the server does not serve the fixture's DER program {program['description']!r}")
+    check_programs(options.fixture, served)
+
+
+async def op_respond(client: Any, options: Options, result: Result) -> None:
+    from py20305.events.modes_bitmask import build_modes_responded
+    from py20305.models.sep import DercontrolResponse, MRidtype, TimeType
+
+    await connect(client)
+    served = await served_programs(client)
+    target = None
+    for program in options.fixture.der_programs:
         for control in program["controls"]:
-            if not any(control_matches(control, dc) for dc in served[program["description"]]):
-                raise OperationError("server-error",
-                                     f"the server does not serve the fixture's control {control['description']!r} "
-                                     f"of {program['description']!r}")
+            if control.get("start", 0) == 0:
+                target = (program, control)
+                break
+        if target:
+            break
+    if target is None:
+        raise OperationError("invalid-request", "the fixture has no control that is active now (start 0)")
+    program, control = target
+    sp = served.get(program["description"])
+    match = next((dc for dc in sp.controls if control_matches(control, dc, program, sp)), None) if sp else None
+    if match is None:
+        raise OperationError("server-error", f"the server does not serve the fixture's control "
+                                             f"{control['description']!r} of {program['description']!r}")
+    if not match.reply_to:
+        raise OperationError("server-error", f"the served control {match.href} has no replyTo")
+    response = DercontrolResponse(
+        end_device_lfdi=bytes.fromhex(client.http.client_lfdi),
+        status=2,  # event started
+        subject=MRidtype(value=match.m_rid.value),
+        created_date_time=TimeType(value=int(time.time())),
+        # modesResponded is IEEE 2030.5-2023; py20305 omits it for 2018 servers too.
+        modes_responded=None if client.http.server_2018_compat else build_modes_responded(match.dercontrol_base),
+    )
+    result.request = {"method": "POST", "path": match.reply_to}
+    location = await client.http.post(match.reply_to, response)
+    status = last_status(client)
+    result.response = {"status": status, "body": {"control": match.href, "subject": match.m_rid.value.hex().upper(),
+                                                  "location": location}}
+    if status not in (201, 204):
+        raise OperationError("server-error", f"the server answered the DERControlResponse with {status}, "
+                                             "not 201 or 204")
 
 
-def control_matches(control: dict[str, Any], served: Any) -> bool:
-    """Whether a served DERControl has the fixture control's duration and DERControlBase values."""
-    interval, base = served.interval, served.dercontrol_base
-    if interval is None or interval.duration != control["duration"] or base is None:
-        return False
+async def op_log_event(client: Any, options: Options, result: Result) -> None:
+    from py20305.models.sep import LogEvent, Pentype, TimeType
 
-    def value(v: Any) -> Any:
-        return getattr(v, "value", v)
+    want = options.fixture.log_event
+    if want is None:
+        raise OperationError("invalid-request", "the fixture has no logEvent")
+    edev = await connect(client)
+    if not edev.log_event_list_href:
+        raise OperationError("server-error", "the device's EndDevice has no LogEventListLink")
+    event = LogEvent(
+        created_date_time=TimeType(value=int(time.time())),
+        details=want["details"],
+        function_set=want["functionSet"],
+        log_event_code=want["logEventCode"],
+        log_event_id=want["logEventID"],
+        log_event_pen=Pentype(value=want["logEventPEN"]),
+        profile_id=want["profileID"],
+    )
+    result.request = {"method": "POST", "path": edev.log_event_list_href}
+    location = await client.http.post(edev.log_event_list_href, event)
+    status = last_status(client)
+    result.response = {"status": status, "body": {"location": location}}
+    if status != 201:
+        raise OperationError("server-error", f"the server answered the LogEvent with {status}, not 201")
 
-    got = {name: value(getattr(base, attr)) for name, attr in (
-        ("opModConnect", "op_mod_connect"), ("opModEnergize", "op_mod_energize"),
-        ("opModMaxLimW", "op_mod_max_lim_w"), ("opModFixedW", "op_mod_fixed_w"),
-    ) if getattr(base, attr, None) is not None}
-    return got == control["base"]
+
+async def op_put_der(client: Any, options: Options, result: Result) -> None:
+    from py20305.models.sep import (
+        ActivePower, Dercapability, DercontrolType, Dersettings, Dertype, PowerOfTenMultiplierType, TimeType,
+    )
+    from py20305.telemetry.der_availability import build_der_availability
+    from py20305.telemetry.der_status import build_der_status
+
+    der = options.fixture.der
+    if der is None:
+        raise OperationError("invalid-request", "the fixture has no der")
+    edev = await connect(client)
+    if not edev.ders:
+        raise OperationError("server-error", "the device's EndDevice has no DER in a DERList")
+
+    def active(p: dict[str, int]) -> Any:
+        return ActivePower(multiplier=PowerOfTenMultiplierType(value=p["multiplier"]), value=p["value"])
+
+    now = int(time.time())
+    cap, settings, status, avail = der["capability"], der["settings"], der["status"], der["availability"]
+    # The CSIP-AUS doeModesSupported and doeModesEnabled extensions, when the
+    # fixture has them, as py20305 sends them in CSIP-AUS mode
+    # (telemetry/der_capability.py, der_settings.py): its models, and the
+    # csipaus namespace declared by Sep2Client.put with csip_aus_mode.
+    cap_ext: list[Any] = []
+    settings_ext: list[Any] = []
+    if "doeModesSupported" in cap or "doeModesEnabled" in settings:
+        from py20305.models.csipaus.csipaus_ext import DoeModesEnabled, DoeModesSupported
+
+        client.http.csip_aus_mode = True
+        if "doeModesSupported" in cap:
+            cap_ext.append(DoeModesSupported(value=bytes.fromhex(cap["doeModesSupported"])))
+        if "doeModesEnabled" in settings:
+            settings_ext.append(DoeModesEnabled(value=bytes.fromhex(settings["doeModesEnabled"])))
+    resources = [
+        ("DERCapability", edev.der_capability_href, Dercapability(
+            modes_supported=DercontrolType(value=bytes.fromhex(cap["modesSupported"])),
+            rtg_max_w=active(cap["rtgMaxW"]),
+            type_value=Dertype(value=cap["type"]),
+            other_element=cap_ext)),
+        ("DERSettings", edev.der_settings_href, Dersettings(
+            modes_enabled=DercontrolType(value=bytes.fromhex(settings["modesEnabled"])),
+            set_max_w=active(settings["setMaxW"]),
+            set_grad_w=settings["setGradW"],
+            updated_time=TimeType(value=now),
+            other_element=settings_ext)),
+        # Under 2018 compatibility py20305 sends genConnectStatus, under 2023
+        # connectStatus with it (telemetry/der_status.py).
+        ("DERStatus", edev.der_status_href, build_der_status(
+            {"genConnectStatus": {"value": int(status["genConnectStatus"], 16)},
+             "operationalModeStatus": {"value": status["operationalModeStatus"]}},
+            server_2018_compat=client.http.server_2018_compat, default_time=now)),
+        ("DERAvailability", edev.der_availability_href, build_der_availability(
+            {"availabilityDuration": avail["availabilityDuration"], "statWAvail": avail["statWAvail"]},
+            default_time=now)),
+    ]
+    puts: list[dict[str, Any]] = []
+    result.response = {"status": None, "body": {"puts": puts}}
+    for name, href, model in resources:
+        if not href:
+            raise OperationError("server-error", f"the device's DER has no {name}Link")
+        result.request = {"method": "PUT", "path": href}
+        code = await client.http.put(href, model)
+        puts.append({"resource": name, "path": href, "status": code})
+        result.response["status"] = code
+        if code not in (200, 204):
+            raise OperationError("server-error", f"the server answered the {name} PUT with {code}")
 
 
-async def op_report(client: Any, fixture: Fixture, result: Result, dcap_path: str) -> None:
+# ---- pricing ----
+
+
+async def op_poll_pricing(client: Any, options: Options, result: Result) -> None:
+    from py20305.client import discovery
+    from py20305.models.sep import ConsumptionTariffIntervalList
+
+    edev = await connect(client)
+    result.request = {"method": "GET", "path": href_of(edev.device.function_set_assignments_list_link)}
+    state = client.state
+    if not state.tariff_profiles and href_of(state.dcap.tariff_profile_list_link):
+        # py20305 follows the TariffProfileListLinks of the FunctionSetAssignments
+        # only; the DeviceCapability's is the contract's fallback, walked with
+        # the same discovery step.
+        result.request = {"method": "GET", "path": href_of(state.dcap.tariff_profile_list_link)}
+        await discovery._discover_tariffs_for_fsa(client.http, state.dcap, state)
+
+    first_prices: dict[str, int | None] = {}
+
+    async def first_price(tti: Any) -> int | None:
+        href = href_of(tti.consumption_tariff_interval_list_link)
+        if not href:
+            return None
+        if href not in first_prices:
+            pages = await client.http.get_list(href, ConsumptionTariffIntervalList)
+            ctis = [cti for page in pages for cti in page.consumption_tariff_interval]
+            first_prices[href] = ctis[0].price if ctis else None
+        return first_prices[href]
+
+    served = []
+    for tp in state.tariff_profiles.values():
+        components = []
+        for rc in tp.rate_components:
+            intervals = [{"duration": tti.interval.duration if tti.interval else None,
+                          "price": await first_price(tti)} for tti in rc.time_tariff_intervals]
+            components.append({"description": rc.rate_component.description, "intervals": intervals})
+        served.append({"description": tp.profile.description, "currency": value_of(tp.profile.currency),
+                       "pricePowerOfTenMultiplier": value_of(tp.profile.price_power_of_ten_multiplier),
+                       "rateComponents": components})
+    result.response = {"status": 200, "body": {"tariffs": served}}
+    for tariff in options.fixture.tariffs:
+        candidates = [t for t in served if t["description"] == tariff["description"]
+                      and t["currency"] == tariff["currency"]
+                      and t["pricePowerOfTenMultiplier"] == tariff["pricePowerOfTenMultiplier"]]
+        if not candidates:
+            raise OperationError("server-error", f"the server does not serve the fixture's tariff "
+                                                 f"{tariff['description']!r} (currency {tariff['currency']}, "
+                                                 f"multiplier {tariff['pricePowerOfTenMultiplier']})")
+        for rc in tariff["rateComponents"]:
+            comps = [c for t in candidates for c in t["rateComponents"] if c["description"] == rc["description"]]
+            if not comps:
+                raise OperationError("server-error", f"the server does not serve the rate component "
+                                                     f"{rc['description']!r} of {tariff['description']!r}")
+            for interval in rc["timeTariffIntervals"]:
+                want = {"duration": interval["duration"], "price": interval["price"]}
+                if not any(want in c["intervals"] for c in comps):
+                    raise OperationError("server-error", f"the server does not serve the interval "
+                                                         f"{interval['description']!r} of {rc['description']!r}")
+
+
+# ---- metering ----
+
+
+async def op_report(client: Any, options: Options, result: Result) -> None:
     from py20305.models.sep import (
         AccumulationBehaviourType, CommodityType, DataQualifierType, DateTimeInterval, FlowDirectionType,
         KindType, MirrorMeterReading1, MirrorUsagePoint, MRidtype, PhaseCode, PowerOfTenMultiplierType,
         Reading1, ReadingType1, RoleFlagsType, ServiceKind, TimeType, UomType,
     )
 
+    fixture = options.fixture
     await client.connect()
     href = client.state.mup_list_href
     if not href:
@@ -490,9 +1011,69 @@ async def op_report(client: Any, fixture: Fixture, result: Result, dcap_path: st
         mirror_meter_reading=readings,
     )
     location = await client.http.post(href, mup)
-    result.response = {"status": 201, "body": {"location": location}}
+    result.response = {"status": last_status(client), "body": {"location": location}}
     if not location:
         raise OperationError("server-error", "the server did not answer the MirrorUsagePoint with a Location")
+
+
+# ---- subscriptions ----
+
+
+async def op_subscribe(client: Any, options: Options, result: Result) -> None:
+    from py20305.client.tls import TlsConfig
+    from py20305.models.sep import Subscription
+    from py20305.subscription.notification_server import NotificationServer
+
+    tls_dir = options.tls_dir
+    if (tls_dir / "notify.crt").is_file() and (tls_dir / "notify.key").is_file():
+        cert, key = tls_dir / "notify.crt", tls_dir / "notify.key"
+    else:
+        cert, key = tls_dir / "client.crt", tls_dir / "client.key"
+    # NotificationServer serves TlsConfig.client_cert as its own certificate.
+    listener_tls = TlsConfig(client_cert=cert, client_key=key, ca_cert=tls_dir / "ca.crt")
+    arrived: asyncio.Queue[Any] = asyncio.Queue()
+
+    async def on_notification(notification: Any) -> None:
+        await arrived.put(notification)
+
+    # warn: a server need not present a certificate when it delivers.
+    server = NotificationServer(host=options.notify_listen[0], port=options.notify_listen[1], tls=listener_tls,
+                                on_notification=on_notification, client_cert_mode="warn")
+    try:
+        await server.start()
+    except OSError as exc:
+        raise OperationError("invalid-request", f"cannot listen on {options.notify_listen[0]}:"
+                                                f"{options.notify_listen[1]}: {exc}") from None
+    try:
+        edev = await connect(client)
+        if not edev.subscription_list_href:
+            raise OperationError("server-error", "the device's EndDevice has no SubscriptionListLink")
+        if not edev.fsa_list or not href_of(edev.fsa_list[0].derprogram_list_link):
+            raise OperationError("server-error", "the device's first FunctionSetAssignments has no DERProgramListLink")
+        resource = href_of(edev.fsa_list[0].derprogram_list_link)
+        notification_uri = f"https://{options.notify_host}/notify"
+        subscription = Subscription(subscribed_resource=resource, encoding=0, level="+S1", limit=1,
+                                    notification_uri=notification_uri)
+        result.request = {"method": "POST", "path": edev.subscription_list_href}
+        location = await client.http.post(edev.subscription_list_href, subscription)
+        status = last_status(client)
+        body: dict[str, Any] = {"location": location, "subscribedResource": resource,
+                                "notificationURI": notification_uri, "notification": None}
+        result.response = {"status": status, "body": body}
+        if status != 201:
+            raise OperationError("server-error", f"the server answered the Subscription with {status}, not 201")
+        notification = await arrived.get()
+        body["notification"] = {
+            "subscribedResource": notification.subscribed_resource,
+            "subscriptionURI": notification.subscription_uri,
+            "status": value_of(notification.status),
+            "resource": type(notification.resource).__name__ if notification.resource is not None else None,
+        }
+        if value_of(notification.status) != 0:
+            raise OperationError("server-error", f"the Notification has status {value_of(notification.status)}, "
+                                                 "not 0 (default)")
+    finally:
+        await server.stop()
 
 
 if __name__ == "__main__":

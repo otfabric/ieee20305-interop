@@ -21,6 +21,85 @@ them into a multi-arch index on GHCR, and creates the GitHub release with
 Consumers pin the digests. Every adapter with a Dockerfile must be in the
 Makefile's `ADAPTERS`, or the release fails.
 
+## v0.2.0
+
+**Date:** 2026-10-23  
+**Previous release:** v0.1.0
+
+### Summary
+
+Container contract 0.3 and fixture schema 1.1: subscriptions with
+notifications, DER responses, log events, DER resources, flow reservations
+and pricing, several programs with default controls, and CSIP-AUS dynamic
+operating envelopes, each tested as far as each stack allows.
+
+| Image | Server operations | Client operations | Fixtures |
+|-------|-------------------|-------------------|----------|
+| `ieee20305-interop-gridappsd` (2018, 2023) | register, discover, poll-controls, report, subscribe, respond, log-event, flow-reservation; `call issue-control` | register, discover, poll-controls, report, respond, log-event, put-der, flow-reservation | baseline, csip |
+| `ieee20305-interop-envoy` (2018) | register, discover, poll-controls, report, respond, log-event, put-der, poll-pricing | | baseline, csip-aus |
+| `ieee20305-interop-py20305` (2018; 2023 without put-der and poll-pricing) | | register, discover, poll-controls, report, subscribe, respond, log-event, put-der, poll-pricing | baseline, csip, csip-aus (2023: baseline, csip) |
+| `ieee20305-interop-epri` (2018) | | register, discover, poll-controls, report, respond | baseline |
+
+### Added
+
+- **Contract 0.3** (`docs/CONTAINER_CONTRACT.md`):
+  - `subscribe`: the client's HTTPS notification listener
+    (`--notify-listen`, `--notify-host`, and `notify.crt`/`notify.key` in
+    its `--tls-dir`), the Subscription it posts, and `ok` once a Notification
+    arrives.
+  - New client operations `respond`, `log-event`, `put-der`,
+    `flow-reservation` and `poll-pricing`. `poll-controls` also checks
+    default controls and curves.
+  - `call issue-control` on a server, through its control socket, so that a
+    test can change what a server serves and make it notify.
+  - Server events `device-registered` and `subscription-created`.
+  - Capabilities name the fixtures, `call` operations and events of each
+    role, and the features `defaultControl`, `curves`, `pricing`,
+    `messaging` and `flowReservation`.
+- **Fixture schema 1.1** (`docs/FIXTURES.md`): several programs, default
+  controls, CSIP-AUS limits (`opModExpLimW`, `opModImpLimW`,
+  `opModGenLimW`, `opModLoadLimW`), curves, tariffs, messages, and what a
+  client sends for its DER, a log event and a flow reservation. New baked
+  fixtures `csip` (two programs with default controls, `opModMaxLimW`,
+  `opModFixedW`) and `csip-aus` (dynamic operating envelopes as controls and
+  defaults, and a time-of-use tariff).
+- **gridappsd**: programs in their own FunctionSetAssignments, default
+  controls, `opModFixedW`; subscriptions and notifications, with one
+  upstream patch that links the EndDevice's SubscriptionListLink
+  (`adapters/gridappsd/patches/0001`); events from sep2server's traffic
+  capture; `call issue-control`. The client performs `respond`,
+  `log-event`, `put-der` and `flow-reservation`.
+- **envoy**: CSIP-AUS limits as controls and as each program's
+  DefaultDERControl, `opModFixedW`, several programs, tariffs; `respond`,
+  `log-event` and `put-der` served; `device-registered`; self-registered
+  devices are in Envoy's default site group, so they get the programs too.
+- **py20305**: `subscribe` with py20305's own notification server,
+  `respond`, `log-event`, `put-der`, `poll-pricing`, and CSIP-AUS limits,
+  default controls and curves in `poll-controls`.
+- **epri**: `report` (client_test's own MirrorUsagePoint) and `respond`.
+- **Self-tests**: `scripts/interop.sh` runs every baked fixture both ends
+  declare, the subscribe test with a named client container the server
+  notifies, and the event checks; `scripts/smoke.sh` checks every baked
+  fixture, `call` and the new operations; `make_pki` issues the
+  notification listener's certificate; `make selftest`.
+
+### Known issues
+
+- Subscriptions pass from py20305 to GridAPPS-D only. The GridAPPS-D client's
+  listener needs CCM_8 and a client certificate, which sep2server's delivery
+  does not offer; Envoy accepts subscriptions from aggregator certificates
+  only; EPRI's client has them commented out.
+- No baked fixture has curves (sep2server cannot serve them), and no server
+  can be seeded with messages.
+- Upstream defects in `tests/known-bugs.tsv`: py20305 writes CSIP-AUS
+  extensions in an older namespace than Envoy reads (`put-der`), and does
+  not model the `RateComponentLink` that CSIP-AUS 1.3 requires in a
+  TimeTariffInterval, so it refuses Envoy's tariffs (`poll-pricing`); EPRI's client crashes on GridAPPS-D's long hrefs,
+  sends the draft 2.0.4 namespace, and cannot parse Envoy's EndDevice.
+- `client run` is not implemented.
+
+---
+
 ## v0.1.0
 
 **Date:** 2026-10-22  

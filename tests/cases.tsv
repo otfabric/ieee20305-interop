@@ -1,14 +1,24 @@
 # The test ids of scripts/interop.sh, for each IEEE 2030.5 version V (2018,
-# 2023), run for every client/server pairing. tests/known-bugs.tsv matches
-# these ids. Tab-separated:
+# 2023), run for every client/server pairing and every baked fixture F both
+# declare. A test of the baseline fixture has the id V.<name>, a test of
+# another fixture V.F.<name> (for example 2018.csip-aus.poll-controls).
+# tests/known-bugs.tsv matches these ids. Tab-separated:
 # id	operation	description
 V.tls		The two ends have a TLS cipher suite in common (SKIP_UNSUPPORTED otherwise)
-V.ready		The server becomes ready (INFRA_ERROR otherwise)
-V.register	register	The client registers its device and finds the fixture's PIN
-V.discover	discover	The client reads the server's DeviceCapability
-V.poll-controls	poll-controls	The client finds the fixture's DER programs and controls
-V.report	report	The client reports the fixture's metering
-V.subscribe	subscribe	The client subscribes to its DER programs
+V[.F].fixture		Both ends declare the fixture F (SKIP_UNSUPPORTED otherwise)
+V[.F].ready		The server becomes ready with the fixture (INFRA_ERROR otherwise)
+V[.F].register	register	The client registers its device and finds the fixture's PIN
+V[.F].discover	discover	The client reads the server's DeviceCapability
+V[.F].poll-controls	poll-controls	The client finds the fixture's DER programs with their controls, default controls and curves
+V[.F].report	report	The client reports the fixture's metering
+V[.F].subscribe	subscribe	The client subscribes to its DER program list, the server changes it (call issue-control) and notifies the client
+V[.F].events.subscription-created		After a successful subscribe, the server reported subscription-created
+V[.F].respond	respond	The client responds to the control that is active now, and the server accepts the response
+V[.F].log-event	log-event	The client posts the fixture's log event
+V[.F].put-der	put-der	The client puts the fixture's DER capability, settings, status and availability
+V[.F].flow-reservation	flow-reservation	The client posts the fixture's flow reservation request
+V[.F].poll-pricing	poll-pricing	The client finds the fixture's tariffs, rate components and intervals
 V.register.unprovisioned	register	A device of the same CA that the server did not provision is not registered
+V.events.device-registered		A server that let the unprovisioned device create its EndDevice reported device-registered
 V.mtls.other-ca	discover	A device certificate of another CA is refused (exit 3)
-V.events.json-lines		The server's stdout is JSON Lines only
+V[.F].events.json-lines		The server's stdout is JSON Lines only

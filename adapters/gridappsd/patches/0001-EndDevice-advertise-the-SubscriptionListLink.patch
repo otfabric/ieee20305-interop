@@ -1,0 +1,72 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ieee20305-interop <noreply@otfabric.invalid>
+Date: Thu, 22 Oct 2026 22:56:15 +0200
+Subject: [PATCH] EndDevice: advertise the SubscriptionListLink
+
+sep2server v0.18.0 mounts GET and POST /edev/{id}/sub
+(pkg/sep2srv/assembly/assembly.go:830-832), but no production path sets
+EndDevice.SubscriptionListLink, so a client that follows links from /dcap,
+as IEEE 2030.5 clients do, cannot find where to post a Subscription.
+
+Stamp the link wherever LogEventLinkedEndDeviceStore stamps the
+LogEventListLink (Create, Update, Get and the href-derived read paths), with
+the href of the mounted route. Applied by the ieee20305-interop gridappsd
+adapter (adapters/gridappsd/patches); nothing else changes.
+---
+ pkg/store/memory/logeventbinding.go | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/pkg/store/memory/logeventbinding.go b/pkg/store/memory/logeventbinding.go
+index 2c96058..03f1d29 100644
+--- a/pkg/store/memory/logeventbinding.go
++++ b/pkg/store/memory/logeventbinding.go
+@@ -52,6 +52,11 @@ import (
+ // assertion in pkg/sep2srv/assembly rather than reaching a client.
+ func LogEventListHref(key string) string { return "/edev/" + key + "/lel" }
+ 
++// SubscriptionListHref is the href of the subscription list of the device
++// stored under key: GET and POST /edev/{id}/sub are mounted, and the device
++// advertises them with its SubscriptionListLink (ieee20305-interop patch).
++func SubscriptionListHref(key string) string { return "/edev/" + key + "/sub" }
++
+ // LogEventLinkedEndDeviceStore decorates any [store.EndDeviceStore] so every
+ // EndDevice it serves advertises its LogEventList.
+ //
+@@ -111,6 +116,7 @@ func NewLogEventLinkedEndDeviceStore(devs store.EndDeviceStore, events store.Sco
+ // stored under, discarding whatever the caller supplied.
+ func (s *LogEventLinkedEndDeviceStore) Create(ctx context.Context, id string, device sep2.EndDevice) error {
+ 	device.LogEventListLink = &sep2.ListLink{Href: LogEventListHref(id)}
++	device.SubscriptionListLink = &sep2.ListLink{Href: SubscriptionListHref(id)}
+ 	return s.devs.Create(ctx, id, device)
+ }
+ 
+@@ -118,6 +124,7 @@ func (s *LogEventLinkedEndDeviceStore) Create(ctx context.Context, id string, de
+ // PUT body cannot install a link of its own choosing.
+ func (s *LogEventLinkedEndDeviceStore) Update(ctx context.Context, id string, device sep2.EndDevice) error {
+ 	device.LogEventListLink = &sep2.ListLink{Href: LogEventListHref(id)}
++	device.SubscriptionListLink = &sep2.ListLink{Href: SubscriptionListHref(id)}
+ 	return s.devs.Update(ctx, id, device)
+ }
+ 
+@@ -162,6 +169,7 @@ func (s *LogEventLinkedEndDeviceStore) Get(ctx context.Context, id string) (sep2
+ 		return sep2.EndDevice{}, err
+ 	}
+ 	device.LogEventListLink = &sep2.ListLink{Href: LogEventListHref(id)}
++	device.SubscriptionListLink = &sep2.ListLink{Href: SubscriptionListHref(id)}
+ 	return device, nil
+ }
+ 
+@@ -214,8 +222,10 @@ func (s *LogEventLinkedEndDeviceStore) deriveByHref(device sep2.EndDevice) sep2.
+ 	key, ok := keyFromEndDeviceHref(device.Href)
+ 	if !ok {
+ 		device.LogEventListLink = nil
++		device.SubscriptionListLink = nil
+ 		return device
+ 	}
+ 	device.LogEventListLink = &sep2.ListLink{Href: LogEventListHref(key)}
++	device.SubscriptionListLink = &sep2.ListLink{Href: SubscriptionListHref(key)}
+ 	return device
+ }
+-- 
+2.56.0
+

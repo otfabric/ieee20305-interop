@@ -39,6 +39,12 @@ RUN set -eu; \
         if [ "${got}" != "$4" ]; then echo "$2 $3 is commit ${got}, not $4" >&2; exit 1; fi; \
     done
 
+# The adapter's patches of the server (patches/, each explained in its
+# header), on top of the pinned commit.
+COPY adapters/gridappsd/patches/ /src/patches/
+RUN set -eu; \
+    for patch in /src/patches/*.patch; do git -C server apply --verbose "${patch}"; done
+
 # The server, from its vendored modules.
 RUN set -eu; \
     cd server; \

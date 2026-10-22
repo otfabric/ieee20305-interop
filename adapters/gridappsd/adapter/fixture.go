@@ -14,11 +14,67 @@ import (
 // repository validates fixtures against the schema; the adapter checks what
 // it relies on and exits 4 on a violation.
 type Fixture struct {
-	SchemaVersion string       `json:"schemaVersion"`
-	Name          string       `json:"name"`
-	Device        Device       `json:"device"`
-	DERPrograms   []DERProgram `json:"derPrograms"`
-	Report        Report       `json:"report"`
+	SchemaVersion string            `json:"schemaVersion"`
+	Name          string            `json:"name"`
+	Device        Device            `json:"device"`
+	DERPrograms   []DERProgram      `json:"derPrograms"`
+	Report        Report            `json:"report"`
+	Tariffs       []json.RawMessage `json:"tariffs"`
+	Messages      []json.RawMessage `json:"messages"`
+	DER           *DERFixture       `json:"der"`
+	LogEvent      *LogEventFixture  `json:"logEvent"`
+	FlowRsv       *FlowRsvFixture   `json:"flowReservation"`
+}
+
+// ActivePower is value x 10^multiplier W (or Wh for energy).
+type ActivePower struct {
+	Value      int64 `json:"value"`
+	Multiplier int8  `json:"multiplier"`
+}
+
+// DERFixture is what put-der PUTs.
+type DERFixture struct {
+	Capability struct {
+		ModesSupported string      `json:"modesSupported"`
+		RtgMaxW        ActivePower `json:"rtgMaxW"`
+		Type           uint8       `json:"type"`
+		DOEModes       string      `json:"doeModesSupported"`
+	} `json:"capability"`
+	Settings struct {
+		ModesEnabled string      `json:"modesEnabled"`
+		SetMaxW      ActivePower `json:"setMaxW"`
+		SetGradW     uint16      `json:"setGradW"`
+		DOEModes     string      `json:"doeModesEnabled"`
+	} `json:"settings"`
+	Status struct {
+		GenConnectStatus      string `json:"genConnectStatus"`
+		OperationalModeStatus uint8  `json:"operationalModeStatus"`
+	} `json:"status"`
+	Availability struct {
+		AvailabilityDuration uint32      `json:"availabilityDuration"`
+		StatWAvail           ActivePower `json:"statWAvail"`
+	} `json:"availability"`
+}
+
+// LogEventFixture is the LogEvent log-event POSTs.
+type LogEventFixture struct {
+	LogEventCode uint8  `json:"logEventCode"`
+	LogEventID   uint16 `json:"logEventID"`
+	LogEventPEN  uint32 `json:"logEventPEN"`
+	FunctionSet  uint8  `json:"functionSet"`
+	ProfileID    uint8  `json:"profileID"`
+	Details      string `json:"details"`
+}
+
+// FlowRsvFixture is the FlowReservationRequest flow-reservation POSTs.
+type FlowRsvFixture struct {
+	MRID              string      `json:"mRID"`
+	Description       string      `json:"description"`
+	EnergyRequested   ActivePower `json:"energyRequested"`
+	PowerRequested    ActivePower `json:"powerRequested"`
+	Start             uint32      `json:"start"`
+	Duration          uint32      `json:"duration"`
+	DurationRequested *uint16     `json:"durationRequested"`
 }
 
 // Device is the device of the scenario.
@@ -35,6 +91,21 @@ type DERProgram struct {
 	Primacy        uint8     `json:"primacy"`
 	DefaultControl *Control  `json:"defaultControl"`
 	Controls       []Control `json:"controls"`
+	Curves         []Curve   `json:"curves"`
+}
+
+// Curve is a DERCurve of a program.
+type Curve struct {
+	MRID        string `json:"mRID"`
+	Description string `json:"description"`
+	CurveType   uint8  `json:"curveType"`
+	XMultiplier int8   `json:"xMultiplier"`
+	YMultiplier int8   `json:"yMultiplier"`
+	YRefType    uint8  `json:"yRefType"`
+	Points      []struct {
+		X int32 `json:"x"`
+		Y int32 `json:"y"`
+	} `json:"points"`
 }
 
 // Control is a DERControl or DefaultDERControl. Base holds DERControlBase
@@ -110,29 +181,31 @@ func printCapabilities(args []string) error {
 	if len(args) > 0 {
 		return usagef("print-capabilities takes no arguments")
 	}
-	role := func(ops ...string) map[string]any {
-		if ops == nil {
-			ops = []string{}
-		}
-		return map[string]any{"supported": len(ops) > 0, "operations": ops}
-	}
 	version := map[string]any{
-		"client": role("register", "discover", "poll-controls", "report"),
-		"server": role("register", "discover", "poll-controls", "report"),
+		"client": map[string]any{
+			"supported":  true,
+			"operations": clientOperations,
+			"fixtures":   clientFixtures,
+		},
+		"server": map[string]any{
+			"supported":  true,
+			"operations": serverOperations,
+			"fixtures":   serverFixtures,
+			"calls":      []string{"issue-control"},
+			"events":     []string{"device-registered", "subscription-created"},
+		},
 		"features": map[string]bool{
-			"mTLS":         true,
-			"csip":         true,
-			"csipAus":      false,
-			"subscription": false,
+			"mTLS":            true,
+			"csip":            true,
+			"csipAus":         false,
+			"subscription":    true,
+			"defaultControl":  true,
+			"curves":          false,
+			"pricing":         false,
+			"messaging":       false,
+			"flowReservation": true,
 		},
-		"notes": []string{
-			"TLS: TLS 1.2 with TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 only, in both roles, through the GridAPPS-D fork of crypto/tls; a peer that does not offer CCM_8 cannot connect.",
-			"Server: devices are provisioned by LFDI from the certificates of --tls-dir/devices; the fixture's programs and controls are issued through the sep2server admin API to a device-only FSA, so the server picks its href and keeps the fixture's description and primacy.",
-			"Server: DERControlBase opModFixedW is not supported by the sep2server admin API.",
-			"Client: verifies the server's certificate chain, not its host name: IEEE 2030.5 server certificates need not carry one (internal/inverter/client.go, GRIDAPPSD/ieee-2030_5-server-go#32).",
-			"Server: the DefaultDERControl is served without the fixture's description: the sep2server admin API does not accept one for kind default.",
-			"Subscriptions and the control socket are not implemented by this adapter yet.",
-		},
+		"notes": capabilityNotes,
 	}
 	doc := map[string]any{
 		"schemaVersion":   "1.0",

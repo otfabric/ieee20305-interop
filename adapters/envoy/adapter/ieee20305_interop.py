@@ -8,9 +8,9 @@ certificate's SHA-256 fingerprint in the header Envoy reads. All of it runs
 in this container, as uid 10001, on loopback except the proxy.
 
 Devices are provisioned the way Envoy's own demo seeds its database: sites
-inserted through Envoy's CRUD layer. Programs and controls go through
-Envoy's admin API. Envoy is a server only: the client command validates its
-flags and exits 5.
+inserted through Envoy's CRUD layer. Programs, default controls, controls
+and tariffs go through Envoy's admin API. Envoy is a server only: the client
+command validates its flags and exits 5, as does call.
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ import socket
 import subprocess
 import sys
 import time
+from decimal import Decimal
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -37,10 +38,19 @@ from urllib.parse import urlsplit
 EXIT_OK, EXIT_FAILED, EXIT_USAGE, EXIT_CONNECT, EXIT_FIXTURE, EXIT_UNSUPPORTED = 0, 1, 2, 3, 4, 5
 
 ADAPTER = "envoy"
-CONTRACT_VERSION = "0.2"
+CONTRACT_VERSION = "0.3"
 EDITIONS = ("2018", "2023")  # what --version accepts
 SERVED_EDITIONS = ("2018",)  # what Envoy serves
-OPERATIONS = ("register", "discover", "poll-controls", "report")
+# The server operations a self-test exercises (R4.2). put-der and
+# poll-pricing fail on upstream defects, recorded in tests/known-bugs.tsv:
+# see the notes.
+OPERATIONS = ("register", "discover", "poll-controls", "report", "respond", "log-event", "put-der", "poll-pricing")
+# Every client operation of the contract: client validates them, then exits 5.
+CLIENT_OPERATIONS = ("register", "discover", "poll-controls", "report", "subscribe", "respond", "log-event",
+                     "put-der", "flow-reservation", "poll-pricing")
+CALL_OPERATIONS = ("issue-control",)
+SERVER_FIXTURES = ("baseline", "csip-aus")
+SERVER_EVENTS = ("device-registered",)
 FIXTURES = Path("/fixtures")
 DEFAULT_FIXTURE = FIXTURES / "baseline" / "fixture.json"
 DEFAULT_READY = "/run/ieee20305-interop/ready"
@@ -48,6 +58,7 @@ DEFAULT_READY = "/run/ieee20305-interop/ready"
 ADAPTER_VERSION = os.environ.get("IEEE20305_INTEROP_ADAPTER_VERSION", "dev")
 UPSTREAM_VERSION = os.environ.get("IEEE20305_INTEROP_UPSTREAM_VERSION", "unknown")
 UPSTREAM_REVISION = os.environ.get("IEEE20305_INTEROP_UPSTREAM_REVISION", "unknown")
+UPSTREAM_SHA = UPSTREAM_REVISION if len(UPSTREAM_REVISION) == 40 else "9d00340b5592f1fdf09dc74bd743fc251da0bfb5"
 
 VENV = Path("/opt/venv/bin")
 ALEMBIC_DIR = Path("/opt/envoy")
@@ -65,8 +76,33 @@ CIPHER_SUITES = [
 ]
 
 # DERControlBase elements, by their IEEE 2030.5 names, and the field of
-# Envoy's admin SiteControlRequest that issues them.
-CONTROL_FIELDS = {"opModConnect": "set_connect", "opModEnergize": "set_energized"}
+# Envoy's admin SiteControlRequest that issues them
+# (envoy_schema/admin/schema/site_control.py).
+CONTROL_FIELDS = {
+    "opModConnect": "set_connect",
+    "opModEnergize": "set_energized",
+    "opModFixedW": "set_point_percentage",  # served as int(percent * 100), the fixture's hundredths
+    "opModImpLimW": "import_limit_watts",
+    "opModExpLimW": "export_limit_watts",
+    "opModGenLimW": "generation_limit_watts",
+    "opModLoadLimW": "load_limit_watts",
+}
+# The CSIP-AUS limits a SiteControlGroupDefault holds, and its field; every
+# field of SiteControlGroupDefaultRequest is required (each {"value"} or null).
+DEFAULT_FIELDS = {
+    "opModImpLimW": "import_limit_watts",
+    "opModExpLimW": "export_limit_watts",
+    "opModGenLimW": "generation_limit_watts",
+    "opModLoadLimW": "load_limit_watts",
+}
+DEFAULT_REQUEST_FIELDS = ("import_limit_watts", "export_limit_watts", "generation_limit_watts", "load_limit_watts",
+                          "ramp_rate_percent_per_second", "storage_target_watts")
+ACTIVE_POWER = {"opModImpLimW", "opModExpLimW", "opModGenLimW", "opModLoadLimW"}
+# Envoy's CurrencyCode and FlowDirectionType enums (envoy_schema/server/schema/sep2/types.py).
+CURRENCIES = (0, 36, 124, 840, 978)
+FLOW_DIRECTIONS = (0, 1, 19)
+# Envoy's runtime config site_control_pow10_encoding, at its default.
+POW10_ENCODING = 0
 
 
 class UsageError(Exception):
@@ -92,7 +128,7 @@ def main(argv: list[str]) -> int:
         if command == "client":
             return run_client(args)
         if command == "call":
-            raise CodedError(EXIT_UNSUPPORTED, "call: the control socket is not implemented by the envoy adapter")
+            return run_call(args)
         if command == "print-capabilities":
             if args:
                 raise UsageError("print-capabilities takes no arguments")
@@ -179,6 +215,7 @@ def positive_int(flags: dict[str, str], name: str, default: int, maximum: int) -
 
 
 def capabilities() -> dict[str, Any]:
+    src = f"https://github.com/bsgip/envoy/blob/{UPSTREAM_SHA}/src/envoy"
     notes = [
         "Server only: Envoy has no client role.",
         "Deployment: PostgreSQL, Envoy's server and admin applications under uvicorn, and HAProxy, which "
@@ -186,17 +223,48 @@ def capabilities() -> dict[str, Any]:
         "forwards the client certificate's SHA-256 fingerprint in x-forwarded-client-cert.",
         "Devices of --tls-dir/devices are provisioned as sites of Envoy's NULL aggregator through Envoy's CRUD "
         "layer, as Envoy's demo seeds its database; device registration is on (ALLOW_DEVICE_REGISTRATION), so a "
-        "device that was not provisioned can register itself, with a PIN Envoy chooses.",
-        "Programs and controls are issued through Envoy's admin API: a program is a site control group, a control "
-        "a site control for a site group of the provisioned devices. Envoy describes a control by its start time.",
-        "Fixtures: DERControlBase opModConnect and opModEnergize only (Envoy's CSIP-AUS limits have no base IEEE "
-        "2030.5 equivalent in the fixtures), and no defaultControl (Envoy's defaults are CSIP-AUS limits only).",
+        "device that was not provisioned can register itself, with a PIN Envoy chooses. The adapter's site group "
+        "is Envoy's default group, so a self-registered device sees the fixture's programs and tariffs too.",
+        "device-registered: Envoy logs a registration before it inserts the site, and also when it refuses one "
+        f"({src}/server/manager/end_device.py#L219), so the adapter lists the sites through the admin API every "
+        "0.5 s and reports each one it did not provision.",
+        "Programs, defaults and controls are issued through Envoy's admin API: a program is a site control group, "
+        "its defaultControl the group's SiteControlGroupDefault, a control a site control for the adapter's site "
+        f"group. Envoy describes a control by its start time ({src}/server/mapper/csip_aus/doe.py#L139).",
+        "Fixtures: DERControlBase opModConnect, opModEnergize, opModFixedW and the CSIP-AUS limits opModImpLimW, "
+        "opModExpLimW, opModGenLimW and opModLoadLimW, which Envoy serves as W / 10^0, with a larger multiplier "
+        f"only when the value overflows an int16 ({src}/server/mapper/csip_aus/doe.py#L40); a limit it would "
+        "not serve exactly is exit 5. Envoy cannot issue opModMaxLimW or curve modes and serves no DERCurves: "
+        "the csip fixture is exit 5.",
+        "Default controls hold the CSIP-AUS limits only and carry no description "
+        f"({src}/server/mapper/csip_aus/doe.py#L203): a fixture default with another element is exit 5.",
+        "Pricing is seeded: a tariff (name = description, dnsp_code = rateCode, currency, "
+        "multiplier, primacy), per rate component a tariff component (roleFlags, description, flowDirection), per "
+        "time tariff interval a generated rate for the adapter's site group, whose price is the first "
+        "ConsumptionTariffInterval. Envoy serves no TimeTariffInterval description; it serves the "
+        "RateComponentLink that CSIP-AUS 1.3 (csipaus-core-v1.3.xsd) requires in a TimeTariffInterval "
+        f"({src}/server/mapper/sep2/pricing.py#L373), which py20305 does not model: py20305 "
+        "refuses the TimeTariffIntervalList, so poll-pricing is a known issue of py20305 and the pricing feature "
+        "is not declared. Envoy's CurrencyCode knows 0, 36, 124, 840 and 978 only. Messaging "
+        "is not served: a fixture with messages is exit 5.",
+        "Subscriptions: a device certificate cannot subscribe; Envoy scopes the Subscription resources to an "
+        f"aggregator and refuses the NULL aggregator of device certificates with 403 ({src}/server/api/sep2/"
+        f"subscription.py#L139, {src}/server/request_scope.py#L171), the EndDevice has no SubscriptionListLink, "
+        "and the notificationURI host must be one of an aggregator's domains "
+        f"({src}/server/mapper/sep2/pub_sub.py#L566), which the admin API cannot create. ENABLE_NOTIFICATIONS "
+        f"stays false (in v2.5.0 notifications run in-process, without a broker: {src}/server/main.py#L45).",
+        "No call operations: the adapter has no control socket (call is exit 5).",
+        "Device-posted resources: Responses to the replyTo of each control, LogEvents, and the DER's "
+        "DERCapability, DERSettings, DERStatus and DERAvailability. Envoy requires the CSIP-AUS element "
+        "csipaus:doeModesSupported (namespace https://csipaus.org/ns/v1.3) in a DERCapability, as CSIP-AUS makes "
+        "it mandatory, and answers a DERCapability without it with 400. Envoy has no FlowReservation function set.",
         "Serves IEEE 2030.5-2018, the edition CSIP-AUS is based on.",
-        "Subscriptions and the control socket are not implemented by this adapter yet.",
     ]
-    server = {"supported": True, "operations": list(OPERATIONS)}
+    server = {"supported": True, "operations": list(OPERATIONS), "fixtures": list(SERVER_FIXTURES),
+              "events": list(SERVER_EVENTS)}
     client = {"supported": False, "operations": []}
-    features = {"mTLS": True, "csip": True, "csipAus": False, "subscription": False}
+    features = {"mTLS": True, "csip": True, "csipAus": True, "subscription": False, "defaultControl": True,
+                "curves": False, "pricing": False, "messaging": False, "flowReservation": False}
     return {
         "schemaVersion": "1.0",
         "adapter": ADAPTER,
@@ -243,6 +311,14 @@ def load_fixture(path: str) -> dict[str, Any]:
             program["description"], program["primacy"]
             for control in program["controls"]:
                 control["base"], control["duration"]
+            if "defaultControl" in program:
+                program["defaultControl"]["base"].items()
+        for tariff in fixture.get("tariffs", []):
+            tariff["description"], tariff["currency"], tariff["pricePowerOfTenMultiplier"], tariff["primacy"]
+            for component in tariff["rateComponents"]:
+                component["description"], int(component["roleFlags"], 16)
+                for interval in component["timeTariffIntervals"]:
+                    interval["duration"], interval["price"]
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise CodedError(EXIT_FIXTURE, f"fixture {path}: {exc!r}") from None
     return fixture
@@ -258,34 +334,120 @@ def check_fixture(fixture: dict[str, Any]) -> None:
         raise CodedError(EXIT_UNSUPPORTED, f"Envoy cannot serve the registration PIN {pin}: it would serve "
                                            f"{raw * 10 + sum(int(d) for d in str(raw)) % 10} for the digits {raw}")
     for program in fixture["derPrograms"]:
+        where = f"program {program['description']!r}"
+        if program.get("curves"):
+            raise CodedError(EXIT_UNSUPPORTED, f"{where}: Envoy serves no DERCurves")
         if "defaultControl" in program:
-            raise CodedError(EXIT_UNSUPPORTED, f"program {program['description']!r}: Envoy's default controls are "
-                                               "CSIP-AUS limits only and cannot hold a fixture's defaultControl")
+            for name, value in program["defaultControl"]["base"].items():
+                if name not in DEFAULT_FIELDS:
+                    raise CodedError(EXIT_UNSUPPORTED, f"{where}: Envoy's default controls hold the CSIP-AUS limits "
+                                                       f"only, not the DERControlBase element {name}")
+                check_watts(f"{where}, default control", name, value)
         for control in program["controls"]:
-            for name in control["base"]:
+            for name, value in control["base"].items():
                 if name not in CONTROL_FIELDS:
                     raise CodedError(EXIT_UNSUPPORTED, f"control {control['description']!r}: Envoy cannot issue "
                                                        f"the DERControlBase element {name}")
+                if name in ACTIVE_POWER:
+                    check_watts(f"control {control['description']!r}", name, value)
+    if fixture.get("messages"):
+        raise CodedError(EXIT_UNSUPPORTED, "Envoy serves no messaging (MessagingProgram, TextMessage)")
+    for tariff in fixture.get("tariffs", []):
+        where = f"tariff {tariff['description']!r}"
+        if tariff["currency"] not in CURRENCIES:
+            raise CodedError(EXIT_UNSUPPORTED, f"{where}: Envoy's CurrencyCode has no currency {tariff['currency']}")
+        for component in tariff["rateComponents"]:
+            if component.get("flowDirection", 0) not in FLOW_DIRECTIONS:
+                raise CodedError(EXIT_UNSUPPORTED, f"{where}: Envoy's FlowDirectionType has no flowDirection "
+                                                   f"{component['flowDirection']}")
+
+
+def watts(value: dict[str, int]) -> Decimal:
+    """The W of a fixture ActivePower."""
+    return Decimal(value["value"]).scaleb(value["multiplier"])
+
+
+def check_watts(where: str, name: str, value: dict[str, int]) -> None:
+    """Exit 5 for a limit Envoy would not serve exactly: it serves W / 10^m as an
+    int (doe.py map_to_active_power), with m raised only on an int16 overflow."""
+    w = watts(value)
+    m = POW10_ENCODING
+    served = int(w.scaleb(-m))
+    if not -32768 <= served <= 32767:
+        m = max(m, int(Decimal(abs(w) / 32767).log10().to_integral_value(rounding="ROUND_CEILING")))
+        served = int(w.scaleb(-m))
+    if Decimal(served).scaleb(m) != w:
+        raise CodedError(EXIT_UNSUPPORTED, f"{where}: Envoy would serve {name} {w} W as {served} x 10^{m}")
 
 
 # ---- client ----
+
+
+def unsupported(operation: str, detail: str, edition: str | None = None) -> int:
+    """Prints the result document of an operation the adapter does not perform: exit 5."""
+    document: dict[str, Any] = {"schemaVersion": "1.0", "adapter": ADAPTER}
+    if edition is not None:
+        document["version"] = edition
+    document.update({"operation": operation, "ok": False, "error": {"code": "unsupported", "detail": detail},
+                     "request": None, "response": None, "elapsedMs": 0})
+    emit(document)
+    log(detail)
+    return EXIT_UNSUPPORTED
+
+
+def host_port(value: str, flag: str, port_required: bool) -> None:
+    host, sep, port = value.rpartition(":") if ":" in value else (value, "", "")
+    if not sep and port_required:
+        raise UsageError(f"--{flag} {value!r} is not host:port")
+    if sep and (not port.isdigit() or not 0 < int(port) <= 65535):
+        raise UsageError(f"--{flag} {value!r} has no valid port")
+    if not host and not port_required:
+        raise UsageError(f"--{flag} {value!r} has no host")
 
 
 def run_client(args: list[str]) -> int:
     if not args:
         raise UsageError("client needs an operation")
     op, args = args[0], args[1:]
-    flags = parse_flags(args, "version", "url", "tls-dir", "fixture", "connect-timeout-ms", "timeout-ms", "payload")
-    edition_of(flags)
+    flags = parse_flags(args, "version", "url", "tls-dir", "fixture", "connect-timeout-ms", "timeout-ms", "payload",
+                        "ready-file", "control-socket", "notify-listen", "notify-host")
+    edition = edition_of(flags)
     url = urlsplit(required(flags, "url"))
     if url.scheme != "https" or not url.hostname:
         raise UsageError(f"--url {flags['url']!r} is not an https:// URL")
     positive_int(flags, "connect-timeout-ms", 10000, 3600000)
     positive_int(flags, "timeout-ms", 30000, 3600000)
-    if op not in OPERATIONS + ("subscribe", "run"):
+    if "notify-listen" in flags:
+        host_port(flags["notify-listen"], "notify-listen", True)
+    if "notify-host" in flags:
+        host_port(flags["notify-host"], "notify-host", False)
+    if op not in CLIENT_OPERATIONS + ("run",):
         raise UsageError(f"unknown client operation {op!r}")
+    if op != "run" and ("ready-file" in flags or "control-socket" in flags):
+        raise UsageError(f"client {op} takes no --ready-file or --control-socket")
     required(flags, "tls-dir")
-    raise CodedError(EXIT_UNSUPPORTED, "Envoy is a server only: there is no client role")
+    return unsupported(op, "Envoy is a server only: there is no client role", edition)
+
+
+# ---- call ----
+
+
+def run_call(args: list[str]) -> int:
+    if not args or args[0].startswith("--"):
+        raise UsageError("call needs an operation")
+    op, args = args[0], args[1:]
+    flags = parse_flags(args, "device", "payload", "timeout-ms", "control-socket")
+    if "device" in flags and not flags["device"].isdigit():
+        raise UsageError(f"--device {flags['device']!r} is not an SFDI")
+    if "payload" in flags:
+        try:
+            json.loads(flags["payload"])
+        except ValueError:
+            raise UsageError("--payload is not JSON") from None
+    positive_int(flags, "timeout-ms", 30000, 3600000)
+    # Envoy's admin API could issue a control, but this adapter has no
+    # control socket yet: nothing declares calls.
+    return unsupported(op, f"call {op}: the envoy adapter offers no call operations")
 
 
 # ---- server ----
@@ -390,11 +552,20 @@ class Admin:
         request = urllib.request.Request(f"http://127.0.0.1:{ADMIN_PORT}{path}", data=data, method=method,
                                          headers={"Authorization": self.auth, "Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(request, timeout=30) as resp:
+            with urllib.request.urlopen(request, timeout=10) as resp:
                 text = resp.read().decode()
                 return dict(resp.headers), json.loads(text) if text else None
         except urllib.error.HTTPError as exc:
             raise CodedError(EXIT_FAILED, f"admin {method} {path}: {exc.code} {exc.read().decode()[:300]}") from None
+
+    def create(self, path: str, body: Any) -> int:
+        """POSTs a new entity; its id is the last segment of the Location header."""
+        headers, _ = self.call("POST", path, body)
+        location = {k.lower(): v for k, v in headers.items()}.get("location", "")
+        entity_id = location.rstrip("/").rsplit("/", 1)[-1]
+        if not entity_id.isdigit():
+            raise CodedError(EXIT_FAILED, f"admin POST {path}: no id in Location {location!r}")
+        return int(entity_id)
 
 
 async def seed_sites(database_url: str, devices: list[Device], fixture: dict[str, Any]) -> list[int]:
@@ -433,22 +604,34 @@ async def seed_sites(database_url: str, devices: list[Device], fixture: dict[str
     return site_ids
 
 
-def seed_programs(admin: Admin, fixture: dict[str, Any], site_ids: list[int]) -> None:
-    """A site group of the provisioned sites; per DER program a site control
-    group; per control a site control for that site group."""
-    admin.call("POST", "/site_group", {"name": SITE_GROUP, "default_group": False})
+def control_value(name: str, value: Any) -> Any:
+    """A fixture DERControlBase value as the admin API takes it."""
+    if name in ACTIVE_POWER:
+        return str(watts(value))
+    if name == "opModFixedW":
+        return str(Decimal(value) / 100)
+    return value
+
+
+def seed_programs(admin: Admin, fixture: dict[str, Any], site_ids: list[int]) -> int:
+    """A site group of the provisioned sites, which also takes every device
+    that registers itself (default_group); per DER program a site control
+    group, its default and, per control, a site control for that site group.
+    Returns the site group's id."""
+    admin.call("POST", "/site_group", {"name": SITE_GROUP, "default_group": True})
     _, group = admin.call("GET", f"/site_group/{SITE_GROUP}")
     for site_id in site_ids:
         admin.call("POST", f"/site_group/{SITE_GROUP}/assignments", {"site_id": site_id})
     now = datetime.now(timezone.utc).replace(microsecond=0)
     for program in fixture["derPrograms"]:
-        headers, _ = admin.call("POST", "/site_control_group", {
+        control_group_id = admin.create("/site_control_group", {
             "description": program["description"], "primacy": program["primacy"], "fsa_id": 1,
         })
-        location = {k.lower(): v for k, v in headers.items()}.get("location", "")
-        control_group_id = location.rstrip("/").rsplit("/", 1)[-1]
-        if not control_group_id.isdigit():
-            raise CodedError(EXIT_FAILED, f"admin: no site control group id in Location {location!r}")
+        if "defaultControl" in program:
+            default: dict[str, Any] = dict.fromkeys(DEFAULT_REQUEST_FIELDS)
+            for name, value in program["defaultControl"]["base"].items():
+                default[DEFAULT_FIELDS[name]] = {"value": control_value(name, value)}
+            admin.call("POST", f"/site_control_group/{control_group_id}/default", default)
         controls = []
         for control in program["controls"]:
             request: dict[str, Any] = {
@@ -458,10 +641,49 @@ def seed_programs(admin: Admin, fixture: dict[str, Any], site_ids: list[int]) ->
                 "start_time": (now + timedelta(seconds=control.get("start", 0))).isoformat(),
             }
             for name, value in control["base"].items():
-                request[CONTROL_FIELDS[name]] = value
+                request[CONTROL_FIELDS[name]] = control_value(name, value)
             controls.append(request)
         if controls:
             admin.call("POST", f"/site_control_group/{control_group_id}/controls", controls)
+    return group["site_group_id"]
+
+
+def seed_tariffs(admin: Admin, fixture: dict[str, Any], site_group_id: int) -> None:
+    """Per tariff a tariff (name = description, dnsp_code = rateCode), per rate
+    component a tariff component, per time tariff interval a generated rate
+    for the site group, with its price as the first consumption block."""
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    for tariff in fixture.get("tariffs", []):
+        tariff_id = admin.create("/tariff", {
+            "name": tariff["description"], "dnsp_code": tariff.get("rateCode", ""), "currency_code": tariff["currency"],
+            "price_power_of_ten_multiplier": tariff["pricePowerOfTenMultiplier"], "primacy": tariff["primacy"],
+            "fsa_id": 1,
+        })
+        for component in tariff["rateComponents"]:
+            body: dict[str, Any] = {"tariff_id": tariff_id, "role_flags": int(component["roleFlags"], 16),
+                                    "description": component["description"]}
+            if "flowDirection" in component:
+                body["flow_direction"] = component["flowDirection"]
+            component_id = admin.create("/tariff_component", body)
+            rates = [{
+                "tariff_component_id": component_id,
+                "site_group_id": site_group_id,
+                "calculation_log_id": None,
+                "start_time": (now + timedelta(seconds=interval.get("start", 0))).isoformat(),
+                "duration_seconds": interval["duration"],
+                "price_pow10_encoded": interval["price"],
+            } for interval in component["timeTariffIntervals"]]
+            admin.call("POST", "/tariff_generated_rate", rates)
+
+
+def registered_sites(admin: Admin) -> list[tuple[str, int]]:
+    """(LFDI, SFDI) of every site Envoy holds, page by page."""
+    sites: list[tuple[str, int]] = []
+    while True:
+        _, page = admin.call("GET", f"/site?start={len(sites)}&limit=100")
+        sites.extend((site["lfdi"], site["sfdi"]) for site in page["sites"])
+        if not page["sites"] or len(sites) >= page["total_count"]:
+            return sites
 
 
 def haproxy_config(port: int, tls_dir: Path, pem: Path) -> str:
@@ -553,7 +775,9 @@ def run_server(args: list[str]) -> int:
         processes.start("envoy-admin", [str(VENV / "uvicorn"), "envoy.admin.main:app", "--host", "127.0.0.1",
                                         "--port", str(ADMIN_PORT), "--no-access-log"], env)
         wait_for(lambda: healthy(SERVER_PORT) and healthy(ADMIN_PORT), "Envoy", processes)
-        seed_programs(Admin("interop", admin_password), fixture, site_ids)
+        admin = Admin("interop", admin_password)
+        site_group_id = seed_programs(admin, fixture, site_ids)
+        seed_tariffs(admin, fixture, site_group_id)
 
         config = WORK / "haproxy.cfg"
         config.write_text(haproxy_config(port, tls_dir, pem))
@@ -572,13 +796,27 @@ def run_server(args: list[str]) -> int:
     ready_file.write_text("ready\n")
     event("ready", adapter=ADAPTER, version=edition, port=port, fixture=fixture["name"])
 
+    # Envoy logs a registration before it inserts the site (and also when it
+    # refuses one), so the adapter watches the sites through the admin API:
+    # every site it did not provision was registered by its device.
+    known = {device.lfdi.upper() for device in devices}
     code = EXIT_OK
+    next_poll = 0.0
     while not stopping:
         if (problem := processes.exited()) is not None:
             log(problem)
             code = EXIT_FAILED
             break
-        time.sleep(0.2)
+        if time.monotonic() >= next_poll:
+            next_poll = time.monotonic() + 0.5
+            try:
+                for lfdi, sfdi in registered_sites(admin):
+                    if lfdi.upper() not in known:
+                        known.add(lfdi.upper())
+                        event("device-registered", sfdi=sfdi, lfdi=lfdi.upper())
+            except (CodedError, OSError, ValueError, KeyError, TypeError) as exc:
+                log(f"listing Envoy's sites: {exc}")
+        time.sleep(0.1)
     processes.stop()
     try:
         ready_file.unlink()

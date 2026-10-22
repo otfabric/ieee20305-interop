@@ -32,10 +32,21 @@ from urllib.parse import urlsplit
 EXIT_OK, EXIT_FAILED, EXIT_USAGE, EXIT_CONNECT, EXIT_FIXTURE, EXIT_UNSUPPORTED = 0, 1, 2, 3, 4, 5
 
 ADAPTER = "epri"
-CONTRACT_VERSION = "0.2"
+CONTRACT_VERSION = "0.3"
 EDITIONS = ("2018", "2023")  # what --version accepts
 CLIENT_EDITIONS = ("2018",)  # what EPRI's client is run against
-OPERATIONS = ("register", "discover", "poll-controls")
+# The contract's one-shot client operations.
+CONTRACT_OPERATIONS = ("register", "discover", "poll-controls", "report", "subscribe", "respond", "log-event",
+                       "put-der", "flow-reservation", "poll-pricing")
+# What the adapter performs with client_test, and declares: an operation it
+# performs is declared, and the failures that upstream defects cause are in
+# tests/known-bugs.tsv.
+PERFORMED = ("register", "discover", "poll-controls", "report", "respond")
+OPERATIONS = PERFORMED
+# The baked fixtures the client declares: those the self-tests pass with.
+# register and discover use nothing of a fixture but its PIN, so another
+# fixture with the PIN 111115 works as well, once a server is seeded with it.
+CLIENT_FIXTURES = ("baseline",)
 FIXTURES = Path("/fixtures")
 DEFAULT_FIXTURE = FIXTURES / "baseline" / "fixture.json"
 EPRI = Path("/opt/epri")
@@ -47,7 +58,12 @@ UPSTREAM_REVISION = os.environ.get("IEEE20305_INTEROP_UPSTREAM_REVISION", "unkno
 
 # client_test's own command for each operation; discover is a plain
 # retrieval of the URL.
-COMMANDS = {"discover": [], "register": ["inverter", "register"], "poll-controls": ["inverter", "all"]}
+# report: `fsa meter` reads the EndDevice and its FunctionSetAssignments
+# and DER programs (the EndDevice is complete only then) without the DER
+# controls, and posts client_test's own MirrorUsagePoint. respond: `all`
+# runs the schedule test, which responds to the controls.
+COMMANDS = {"discover": [], "register": ["inverter", "register"], "poll-controls": ["inverter", "all"],
+            "report": ["inverter", "fsa", "meter"], "respond": ["inverter", "all"]}
 
 
 class UsageError(Exception):
@@ -84,7 +100,7 @@ def main(argv: list[str]) -> int:
             required(flags, "tls-dir")
             raise CodedError(EXIT_UNSUPPORTED, "the EPRI client has no server role")
         if command == "call":
-            raise CodedError(EXIT_UNSUPPORTED, "call: the control socket is not implemented by the epri adapter")
+            return run_call(args)
         if command == "print-capabilities":
             if args:
                 raise UsageError("print-capabilities takes no arguments")
@@ -163,26 +179,54 @@ def millis(flags: dict[str, str], name: str, default: float) -> float:
 
 
 def capabilities() -> dict[str, Any]:
+    pin = "https://github.com/epri-dev/IEEE-2030.5-Client/blob/505ee47d9c3ed43ce63087198d09f77338da627d"
     notes = [
         "EPRI's client_test (v0.2.11, unmaintained since 2018), built with its own build script against "
         "Debian trixie's OpenSSL 3, with one patch: the SHA-256 padding of its LFDI computation, which crashed "
         "for one device certificate in eight (adapters/epri/patches).",
         "TLS: TLS 1.2 with TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 only, the client's own cipher list; OpenSSL runs "
         "at security level 0 (adapters/epri/openssl.cnf), under which OpenSSL 3 offers CCM_8 as OpenSSL 1.1.0 did.",
-        "Schema: EPRI's sep.xsd 2.0.4. Its parser accepts no element outside that schema, such as a CSIP-AUS "
-        "extension element.",
-        "client_test prints a present optional boolean as true whatever its value (its output code reads the "
-        "presence bit), so poll-controls matches the fixture's boolean control elements by presence only.",
+        "Schema: EPRI's sep.xsd 2.0.4, a draft of IEEE 2030.5-2018. Its parser accepts no element outside that "
+        "schema, such as the CSIP-AUS element csipaus:ConnectionPointLink that Envoy puts in EndDevice "
+        f"({pin}/parse.c#L215), so against Envoy register fails (tests/known-bugs.tsv).",
+        "Everything client_test sends (POST, PUT) is in the draft name space http://ieee.org/2030.5 "
+        f"({pin}/se_schema.c#L2235), not urn:ieee:std:2030.5:ns of IEEE 2030.5-2018; GridAPPS-D refuses such "
+        "a body with 400 (expected element in name space urn:ieee:std:2030.5:ns).",
         "Connects by IP address (the adapter resolves the URL's host name) and does not check the server's host "
         "name against its certificate.",
-        "register checks for the PIN 111115, which client_test hard-codes; the adapter checks the fixture's PIN "
-        "is that.",
-        "report is not offered: client_test's metering test posts a MirrorUsagePoint of its own, not the "
-        "fixture's. Subscriptions are commented out in client_test.",
+        "register checks for the PIN 111115, which client_test hard-codes "
+        f"({pin}/client_test.c#L327); the adapter checks the fixture's PIN is that. register and discover use "
+        "nothing else of the fixture; the client declares the baseline fixture, the only one a server it "
+        "works with (GridAPPS-D) is seeded with in the self-tests.",
+        "poll-controls runs inverter all. Known upstream issues (tests/known-bugs.tsv): client_test crashes on "
+        "GridAPPS-D's DERControlList href, longer than its char uri[64] "
+        f"({pin}/retrieve.c#L140), and cannot parse Envoy's EndDevice. It matches programs and controls only, "
+        "not default controls or curves, so a fixture with those is unsupported; and client_test prints a "
+        "present optional boolean as true whatever its value, so it matches boolean control elements by "
+        "presence only.",
+        "report runs inverter fsa meter: client_test posts a MirrorUsagePoint of its own (a random mRID, "
+        "roleFlags 09; then seven readings W, VA, var, PF, V, A, Hz with hard-coded values), not the fixture's "
+        f"({pin}/client_test.c#L250-L265), once it has read the EndDevice's FunctionSetAssignments and DER "
+        "programs; ok on 201 with a Location from the MirrorUsagePointList. Known upstream issues: GridAPPS-D "
+        "refuses its draft name space (400 on POST /mup), and Envoy's EndDevice does not parse.",
+        "respond runs inverter all: client_test's schedule test posts DERControlResponses to the replyTo of "
+        f"a control ({pin}/schedule.c#L142-L151), Received (1) when responseRequired has bit 0 and Started (2) "
+        "and the others when it has bit 1; ok once one for the fixture's control active now (start 0) is "
+        "accepted (201 or 204); response.body lists the statuses it sent. Known upstream issues: the crash on "
+        "GridAPPS-D's DERControlList href (retrieve.c#L140), the draft name space, and Envoy's EndDevice.",
+        "log-event is not offered: client_test's alarm test posts its own LogEvent (details \"Alarms Test\", "
+        f"PEN 37244, no functionSet; {pin}/client_test.c#L188-L208), not the fixture's, after reading the DER "
+        "controls, which crashes on GridAPPS-D (retrieve.c#L140).",
+        "put-der is not offered: client_test PUTs the DERAvailability, DERCapability, DERSettings and DERStatus "
+        f"of its ./settings files (draft 2.0.4 elements), not the fixture's, to the first DER of the EndDevice's "
+        f"DERList ({pin}/client_test.c#L214-L231); GridAPPS-D's EndDevice has no DERListLink.",
+        f"subscribe is not offered: client_test's subscription code is commented out ({pin}/client_test.c#L235-L239). "
+        "flow-reservation and poll-pricing are not in client_test. client run and call are not implemented.",
     ]
-    client = {"supported": True, "operations": list(OPERATIONS)}
+    client = {"supported": True, "operations": list(OPERATIONS), "fixtures": list(CLIENT_FIXTURES)}
     server = {"supported": False, "operations": []}
-    features = {"mTLS": True, "csip": True, "csipAus": False, "subscription": False}
+    features = {"mTLS": True, "csip": False, "csipAus": False, "subscription": False, "defaultControl": False,
+                "curves": False, "pricing": False, "messaging": False, "flowReservation": False}
     return {
         "schemaVersion": "1.0",
         "adapter": ADAPTER,
@@ -237,38 +281,98 @@ def load_fixture(path: str) -> dict[str, Any]:
 # ---- client ----
 
 
+def run_call(args: list[str]) -> int:
+    """call <operation>: the epri adapter has no control socket (no client run)."""
+    if not args or args[0].startswith("--"):
+        raise UsageError("call needs an operation")
+    op, args = args[0], args[1:]
+    flags = parse_flags(args, "device", "payload", "timeout-ms", "control-socket")
+    millis(flags, "timeout-ms", 30.0)
+    if "device" in flags and not flags["device"].isdigit():
+        raise UsageError(f"--device {flags['device']!r} is not an SFDI")
+    if "payload" in flags:
+        try:
+            json.loads(flags["payload"])
+        except ValueError:
+            raise UsageError("--payload is not JSON") from None
+    emit({
+        "schemaVersion": "1.0",
+        "adapter": ADAPTER,
+        "operation": op,
+        "ok": False,
+        "error": {"code": "unsupported", "detail": "the epri adapter has no client run and offers no call operation"},
+        "request": None,
+        "response": None,
+        "elapsedMs": 0,
+    })
+    return EXIT_UNSUPPORTED
+
+
+def host_port(value: str, flag: str, need_port: bool) -> tuple[str, int | None]:
+    """host:port (or host[:port] when need_port is false), with an IPv6 host in brackets."""
+    match = re.fullmatch(r"(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._-]+)(?::(\d{1,5}))?", value)
+    port = int(match.group(2)) if match and match.group(2) else None
+    if not match or (need_port and port is None) or (port is not None and not 0 < port < 65536):
+        raise UsageError(f"--{flag} {value!r} is not {'host:port' if need_port else 'HOST[:PORT]'}")
+    return match.group(1), port
+
+
+def unsupported_detail(op: str, edition: str, fixture: dict[str, Any]) -> str | None:
+    """Why the adapter does not perform op, or None when it does."""
+    if op not in PERFORMED:
+        reasons = {
+            "subscribe": "subscriptions are commented out in client_test",
+            "log-event": "client_test posts a LogEvent of its own (\"Alarms Test\"), not the fixture's",
+            "put-der": "client_test PUTs the DER settings of its own ./settings files, not the fixture's",
+        }
+        return reasons.get(op, f"client_test has no {op} operation")
+    if edition not in CLIENT_EDITIONS:
+        return f"the EPRI client is run against IEEE 2030.5 {', '.join(CLIENT_EDITIONS)} only"
+    if op in ("poll-controls", "respond"):
+        for program in fixture["derPrograms"]:
+            if program.get("defaultControl") or program.get("curves"):
+                return (f"the DER program {program['description']!r} has a default control or curves, "
+                        "which the adapter does not check")
+    return None
+
+
 def run_client(args: list[str]) -> int:
     if not args:
         raise UsageError("client needs an operation")
     op, args = args[0], args[1:]
-    flags = parse_flags(args, "version", "url", "tls-dir", "fixture", "connect-timeout-ms", "timeout-ms", "payload")
+    flags = parse_flags(args, "version", "url", "tls-dir", "fixture", "connect-timeout-ms", "timeout-ms", "payload",
+                        "notify-listen", "notify-host")
     edition = edition_of(flags)
     url = urlsplit(required(flags, "url"))
     if url.scheme != "https" or not url.hostname:
         raise UsageError(f"--url {flags['url']!r} is not an https:// URL")
     connect_timeout = millis(flags, "connect-timeout-ms", 10.0)
     timeout = millis(flags, "timeout-ms", 30.0)
-    if op not in OPERATIONS + ("report", "subscribe", "run"):
+    host_port(flags.get("notify-listen", "0.0.0.0:8443"), "notify-listen", True)
+    if "notify-host" in flags:
+        host_port(flags["notify-host"], "notify-host", False)
+    if "payload" in flags:
+        try:
+            json.loads(flags["payload"])
+        except ValueError:
+            raise UsageError("--payload is not JSON") from None
+    if op not in CONTRACT_OPERATIONS + ("run",):
         raise UsageError(f"unknown client operation {op!r}")
     tls_dir = Path(required(flags, "tls-dir"))
-    fixture = load_fixture(flags.get("fixture", str(DEFAULT_FIXTURE)))
     if op == "run":
         raise CodedError(EXIT_UNSUPPORTED, "client run is not implemented by the epri adapter")
-    for name in ("client.crt", "client.key", "ca.crt"):
-        if not (tls_dir / name).is_file():
-            raise CodedError(EXIT_FIXTURE, f"--tls-dir {tls_dir} has no {name}")
+    fixture = load_fixture(flags.get("fixture", str(DEFAULT_FIXTURE)))
 
     result: dict[str, Any] = {"request": None, "response": None}
     start = time.monotonic()
     error, code = None, EXIT_OK
-    if op in ("report", "subscribe"):
-        reason = ("client_test posts a MirrorUsagePoint of its own, not the fixture's" if op == "report"
-                  else "subscriptions are commented out in client_test")
+    reason = unsupported_detail(op, edition, fixture)
+    if reason:
         error, code = {"code": "unsupported", "detail": reason}, EXIT_UNSUPPORTED
-    elif edition not in CLIENT_EDITIONS:
-        error, code = {"code": "unsupported", "detail": f"the EPRI client is run against IEEE 2030.5 "
-                                                       f"{', '.join(CLIENT_EDITIONS)} only"}, EXIT_UNSUPPORTED
     else:
+        for name in ("client.crt", "client.key", "ca.crt"):
+            if not (tls_dir / name).is_file():
+                raise CodedError(EXIT_FIXTURE, f"--tls-dir {tls_dir} has no {name}")
         try:
             perform(op, url, tls_dir, fixture, connect_timeout, timeout, result)
         except OperationError as exc:
@@ -328,11 +432,35 @@ class Transcript:
         self.documents: list[tuple[str, str, ET.Element]] = []  # (path, tag, element)
         self.requests: list[tuple[str, str]] = []
         self.responded = False
+        # Every exchange: method, path, status, the document sent (tag and
+        # element, for a POST or PUT) and the Location header.
+        self.exchanges: list[dict[str, Any]] = []
         self._path: str | None = None
         self._doc: list[str] = []
+        self._sending = False
+        self._sent: list[str] = []
+        self._sent_doc: ET.Element | None = None
+        self._location: str | None = None
 
     def add(self, line: str) -> None:
         self.lines.append(line)
+        if line == "se_send:":
+            self._sending, self._sent, self._sent_doc = True, [], None
+            return
+        if self._sending:
+            if self._sent or (line.startswith("<") and not line.startswith("<--") and not line.startswith("</")):
+                self._sent.append(line)
+                if line.startswith("</") or (len(self._sent) == 1 and line.rstrip().endswith("/>")):
+                    try:
+                        self._sent_doc = ET.fromstring("\n".join(self._sent))
+                    except ET.ParseError:
+                        self._sent_doc = None
+                    self._sending, self._sent = False, []
+            return
+        if line.startswith("<-- conn"):
+            self._location = None
+        elif line.lower().startswith("location:"):
+            self._location = line.split(":", 1)[1].strip()
         if self._doc:
             self._doc.append(line)
             if line.startswith("</") or (len(self._doc) == 1 and line.rstrip().endswith("/>")):
@@ -343,6 +471,11 @@ class Transcript:
             self.responded = True
             self.requests.append((match.group(1), match.group(2)))
             self._path = match.group(2)
+            sent = self._sent_doc if match.group(1) in ("POST", "PUT") else None
+            self.exchanges.append({"method": match.group(1), "path": match.group(2), "status": int(match.group(3)),
+                                   "tag": sent.tag.split("}")[-1] if sent is not None else None,
+                                   "sent": sent, "location": self._location})
+            self._sent_doc, self._location = None, None
         elif self._path and line.startswith("<") and not line.startswith("</"):
             self._doc = [line]
             if line.rstrip().endswith("/>"):
@@ -473,6 +606,10 @@ def progress(op: str, transcript: Transcript, fixture: dict[str, Any]) -> tuple[
         return ("", "") if transcript.of("DeviceCapability") else None
     if op == "register":
         return ("", "") if last == "registration succeeded" else None
+    if op == "report":
+        return report_outcome(transcript)
+    if op == "respond":
+        return respond_outcome(transcript, fixture)
     # poll-controls: complete when every DERControlList of every program
     # the server lists has been read.
     programs = [p for _, lst in transcript.of("DERProgramList") for p in children(lst, "DERProgram")]
@@ -495,6 +632,72 @@ def progress(op: str, transcript: Transcript, fixture: dict[str, Any]) -> tuple[
                 return "server-error", (f"the server does not serve the fixture's control "
                                         f"{control['description']!r} of {program['description']!r}")
     return "", ""
+
+
+def mup_list(transcript: Transcript) -> str | None:
+    """The MirrorUsagePointList href of the DeviceCapability."""
+    for _, dcap in transcript.of("DeviceCapability"):
+        link = child(dcap, "MirrorUsagePointListLink")
+        if link is not None and link.get("href"):
+            return link.get("href")
+    return None
+
+
+def report_outcome(transcript: Transcript) -> tuple[str, str] | None:
+    """ok once the server created client_test's MirrorUsagePoint: 201 with a Location."""
+    href = mup_list(transcript)
+    for x in transcript.exchanges:
+        if x["method"] != "POST" or x["tag"] != "MirrorUsagePoint" or (href and x["path"] != href):
+            continue
+        if x["status"] == 201 and x["location"]:
+            return "", ""
+        if x["status"] == 201:
+            return "server-error", f"POST {x['path']}: 201 without a Location"
+        return "server-error", f"POST {x['path']} of the MirrorUsagePoint: {x['status']}"
+    return None
+
+
+def active_control(transcript: Transcript, fixture: dict[str, Any]) -> ET.Element | None:
+    """The served DERControl that matches the fixture's control active now (start 0)."""
+    wanted = [(p["description"], c) for p in fixture["derPrograms"] for c in p["controls"] if c.get("start", 0) == 0]
+    lists = {path: element for path, element in transcript.of("DERControlList")}
+    for _, lst in transcript.of("DERProgramList"):
+        for p in children(lst, "DERProgram"):
+            link = child(p, "DERControlListLink")
+            if link is None or link.get("href") not in lists:
+                continue
+            for description, control in wanted:
+                if text_of(p, "description") != description:
+                    continue
+                for served in children(lists[link.get("href")], "DERControl"):
+                    if control_matches(control, served):
+                        return served
+    return None
+
+
+def same_path(reply_to: str, path: str) -> bool:
+    """replyTo may be a path or an absolute URL."""
+    return reply_to == path or urlsplit(reply_to).path == path
+
+
+def respond_outcome(transcript: Transcript, fixture: dict[str, Any]) -> tuple[str, str] | None:
+    """ok once a DERControlResponse to the replyTo of the active control was accepted (201 or 204)."""
+    control = active_control(transcript, fixture)
+    if control is None:
+        return None
+    reply_to = control.get("replyTo")
+    if not reply_to:
+        return "server-error", "the control active now has no replyTo"
+    subject = (text_of(control, "mRID") or "").upper()
+    for x in transcript.exchanges:
+        if x["method"] != "POST" or x["tag"] != "DERControlResponse" or not same_path(reply_to, x["path"]):
+            continue
+        if (text_of(x["sent"], "subject") or "").upper() != subject:
+            continue
+        if x["status"] in (201, 204):
+            return "", ""
+        return "server-error", f"POST {x['path']} of a DERControlResponse: {x['status']}"
+    return None
 
 
 def control_matches(control: dict[str, Any], served: ET.Element) -> bool:
@@ -530,6 +733,23 @@ def summary(op: str, transcript: Transcript) -> dict[str, Any] | None:
         path, dcap = docs[-1]
         links = sorted(c.tag.split("}")[-1] for c in dcap if c.get("href"))
         return {"status": 200, "body": {"href": dcap.get("href"), "pollRate": dcap.get("pollRate"), "links": links}}
+    if op == "report":
+        posted = [x for x in transcript.exchanges if x["tag"] == "MirrorUsagePoint"]
+        if not posted:
+            return None
+        x, sent = posted[-1], posted[-1]["sent"]
+        return {"status": x["status"], "body": {
+            "location": x["location"],
+            "mirrorUsagePoint": {"mRID": text_of(sent, "mRID"), "roleFlags": text_of(sent, "roleFlags")},
+            "note": "client_test posts a MirrorUsagePoint of its own (random mRID, roleFlags 09; its meter test "
+                    "then posts seven readings with hard-coded values), not the fixture's"}}
+    if op == "respond":
+        posted = [x for x in transcript.exchanges if x["tag"] == "DERControlResponse"]
+        if not posted:
+            return None
+        return {"status": posted[-1]["status"], "body": {"responses": [
+            {"path": x["path"], "status": x["status"], "subject": text_of(x["sent"], "subject"),
+             "responseStatus": text_of(x["sent"], "status")} for x in posted]}}
     if op == "register":
         registrations = transcript.of("Registration")
         if not registrations:

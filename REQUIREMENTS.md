@@ -117,5 +117,10 @@ a substitute for IEEE conformance testing.
 - R8.3 Fixtures describe EndDevices, DER programs, DERControls, metering
   readings and test certificate material (CA chain, device certificates).
 - R8.4 Operations: `register` (POST EndDevice), `discover` (GET
-  DeviceCapability, DERProgramList), `poll-controls` (GET DERControlList),
-  `report` (POST MirrorUsagePoint), `subscribe` (POST Subscription).
+  DeviceCapability, DERProgramList), `poll-controls` (GET DERControlList,
+  DefaultDERControl, DERCurve), `report` (POST MirrorUsagePoint),
+  `subscribe` (POST Subscription, receive a Notification), `respond` (POST
+  DERControlResponse), `log-event` (POST LogEvent), `put-der` (PUT
+  DERCapability, DERSettings, DERStatus, DERAvailability),
+  `flow-reservation` (POST FlowReservationRequest), `poll-pricing` (GET
+  TariffProfile, RateComponent, TimeTariffInterval).

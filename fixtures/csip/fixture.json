@@ -1,0 +1,146 @@
+{
+  "schemaVersion": "1.0",
+  "name": "csip",
+  "description": "CSIP: two DER programs (primacy 1 and 2) with default controls, and controls that limit and fix the active power. For servers that issue base IEEE 2030.5 DER functions beyond connect and energize.",
+  "device": {
+    "serial": "ieee20305-interop-device-1",
+    "pin": 111115,
+    "deviceCategory": "00020000"
+  },
+  "derPrograms": [
+    {
+      "mRID": "C0000000000000000000000000000001",
+      "description": "CSIP utility program",
+      "primacy": 1,
+      "defaultControl": {
+        "mRID": "C0000000000000000000000000000002",
+        "description": "Utility default",
+        "base": {
+          "opModConnect": true,
+          "opModMaxLimW": 10000
+        }
+      },
+      "controls": [
+        {
+          "mRID": "C0000000000000000000000000000003",
+          "description": "Limit to 50 %",
+          "base": {
+            "opModMaxLimW": 5000
+          },
+          "duration": 3600,
+          "start": 0
+        },
+        {
+          "mRID": "C0000000000000000000000000000004",
+          "description": "Disconnect",
+          "base": {
+            "opModConnect": false
+          },
+          "duration": 1800,
+          "start": 3600
+        }
+      ]
+    },
+    {
+      "mRID": "C0000000000000000000000000000011",
+      "description": "CSIP aggregator program",
+      "primacy": 2,
+      "defaultControl": {
+        "mRID": "C0000000000000000000000000000012",
+        "description": "Aggregator default",
+        "base": {
+          "opModEnergize": true
+        }
+      },
+      "controls": [
+        {
+          "mRID": "C0000000000000000000000000000013",
+          "description": "Fixed 25 % export",
+          "base": {
+            "opModFixedW": 2500
+          },
+          "duration": 1800,
+          "start": 0
+        }
+      ]
+    }
+  ],
+  "report": {
+    "mirrorUsagePoint": {
+      "mRID": "C0000000000000000000000000000005",
+      "description": "Inverter output",
+      "roleFlags": "0049",
+      "serviceCategoryKind": 0,
+      "status": 1
+    },
+    "meterReadings": [
+      {
+        "mRID": "C0000000000000000000000000000006",
+        "description": "Real power",
+        "readingType": {
+          "accumulationBehaviour": 12,
+          "commodity": 1,
+          "dataQualifier": 2,
+          "flowDirection": 1,
+          "kind": 37,
+          "phase": 0,
+          "powerOfTenMultiplier": 0,
+          "uom": 38
+        },
+        "value": 5000
+      }
+    ]
+  },
+  "der": {
+    "capability": {
+      "modesSupported": "00500088",
+      "rtgMaxW": {
+        "value": 5000,
+        "multiplier": 0
+      },
+      "type": 4
+    },
+    "settings": {
+      "modesEnabled": "00500088",
+      "setMaxW": {
+        "value": 5000,
+        "multiplier": 0
+      },
+      "setGradW": 100
+    },
+    "status": {
+      "genConnectStatus": "07",
+      "operationalModeStatus": 2
+    },
+    "availability": {
+      "availabilityDuration": 3600,
+      "statWAvail": {
+        "value": 4500,
+        "multiplier": 0
+      }
+    }
+  },
+  "logEvent": {
+    "logEventCode": 1,
+    "logEventID": 1,
+    "logEventPEN": 40732,
+    "functionSet": 19,
+    "profileID": 2,
+    "details": "ieee20305-interop log event"
+  },
+  "flowReservation": {
+    "mRID": "C00000000000000000000000000000F1",
+    "description": "Charge reservation",
+    "energyRequested": {
+      "value": 10000,
+      "multiplier": 0
+    },
+    "powerRequested": {
+      "value": 5000,
+      "multiplier": 0
+    },
+    "start": 600,
+    "duration": 7200,
+    "durationRequested": 7200
+  }
+}

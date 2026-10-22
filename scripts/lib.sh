@@ -246,13 +246,15 @@ sfdi_of() {
     echo "${value}$(( (10 - sum % 10) % 10 ))"
 }
 
-# make_pki <dir> <device serial> <server host names...>: the --tls-dir
-# directories for IEEE 2030.5 mutual TLS:
+# make_pki <dir> <device serial> <server host names...> [-- <client host names...>]:
+# the --tls-dir directories for IEEE 2030.5 mutual TLS:
 #   server/          server.crt (for every host name given), server.key,
 #                    ca.crt, and devices/<serial>.crt: the device
 #                    certificates the server provisions
 #   client/          client.crt and client.key of the provisioned device,
-#                    and ca.crt
+#                    and ca.crt; with client host names, notify.crt and
+#                    notify.key, the certificate of the client's
+#                    notification listener for those names (subscribe)
 #   unprovisioned/   as client/, for a device of the same CA that the server
 #                    has not provisioned
 #   other-ca/        as client/, with a device certificate from another CA
@@ -260,13 +262,19 @@ sfdi_of() {
 #                    (the server's certificate does not verify)
 make_pki() {
     local dir="$1" serial="$2" d; shift 2
+    local servers=() clients=()
+    while [[ $# -gt 0 && "$1" != "--" ]]; do servers+=("$1"); shift; done
+    [[ "${1:-}" == "--" ]] && { shift; clients=("$@"); }
     command -v openssl >/dev/null || { log "missing required tool: openssl"; return 1; }
     mkdir -p "${dir}"
     new_ca "${dir}/.ca" "ieee20305-interop test CA ${RUN_ID}" || return 1
     new_ca "${dir}/.rogue" "ieee20305-interop other CA ${RUN_ID}" || return 1
     for d in server/devices client unprovisioned other-ca untrusted; do mkdir -p "${dir}/${d}"; done
-    new_server "${dir}/.ca" "${dir}/server/server" "$@" || return 1
+    new_server "${dir}/.ca" "${dir}/server/server" "${servers[@]}" || return 1
     new_device "${dir}/.ca" "${dir}/client/client" "${serial}" || return 1
+    if [[ ${#clients[@]} -gt 0 ]]; then
+        new_server "${dir}/.ca" "${dir}/client/notify" "${clients[@]}" || return 1
+    fi
     new_device "${dir}/.ca" "${dir}/unprovisioned/client" "unprovisioned-${serial}" || return 1
     new_device "${dir}/.rogue" "${dir}/other-ca/client" "${serial}" || return 1
     cp "${dir}/client/client.crt" "${dir}/server/devices/${serial}.crt"
@@ -276,6 +284,49 @@ make_pki() {
     rm -rf "${dir}/.ca" "${dir}/.rogue"
     # The containers run as uid 10001 and mount the directories read-only.
     chmod -R a+rX "${dir}"
+}
+
+# NOTIFY_PORT is the port of the client's notification listener in the
+# subscribe tests.
+NOTIFY_PORT=8443
+
+# run_subscribe <client adapter> <client host name> <server container>
+#   <trigger: yes or no> [docker run options --] <client args...>:
+# runs client subscribe in a container named and reachable as <client host
+# name>, waits until the server reports subscription-created, then (with
+# trigger yes) makes the server change what it serves with call
+# issue-control, so that it notifies; prints the result document and
+# returns the client's exit code. No server notifies a new subscription by
+# itself (docs/CONTAINER_CONTRACT.md).
+run_subscribe() {
+    local adapter="$1" name="$2" srv="$3" trigger="$4"; shift 4
+    local opts=() i state code before
+    if [[ " $* " == *" -- "* ]]; then
+        while [[ "$1" != "--" ]]; do opts+=("$1"); shift; done
+        shift
+    fi
+    subscriptions() { events "${srv}" | jq -c 'select(.event == "subscription-created")' 2>/dev/null | wc -l; }
+    before=$(subscriptions)
+    docker rm -f "${name}" >/dev/null 2>&1
+    docker run -d --name "${name}" --hostname "${name}" --network "${NETWORK}" --label "ieee20305-interop.run=${RUN_ID}" \
+        ${opts[@]+"${opts[@]}"} "$(image_of "${adapter}")" client subscribe "$@" \
+        --notify-listen "0.0.0.0:${NOTIFY_PORT}" --notify-host "${name}:${NOTIFY_PORT}" >/dev/null || return 1
+    for i in $(seq 1 300); do
+        state=$(docker inspect --format '{{.State.Status}}' "${name}" 2>/dev/null || echo absent)
+        [[ "${state}" == running ]] || break
+        if (( $(subscriptions) > before )); then
+            if [[ "${trigger}" == yes ]]; then
+                docker exec "${srv}" ieee20305-interop call issue-control \
+                    --payload '{"description": "Subscription test", "base": {"opModEnergize": true}, "duration": 600, "start": 0}' >/dev/null 2>&1
+            fi
+            break
+        fi
+        sleep 0.1
+    done
+    code=$(docker wait "${name}" 2>/dev/null)
+    docker logs "${name}" 2>/dev/null
+    docker rm -f "${name}" >/dev/null 2>&1
+    return "${code:-1}"
 }
 
 finish() {

@@ -6,8 +6,14 @@
 #
 # For each pairing, on a private Docker network, with mutual TLS:
 #
-#   register, discover, poll-controls, report, subscribe
-#                  each operation the client declares for that version
+#   register, discover, poll-controls, report, subscribe, respond,
+#   log-event, put-der, flow-reservation, poll-pricing
+#                  each operation the client declares for that version and
+#                  the server serves, for every baked fixture both declare
+#                  (test ids V.<op> for the baseline, V.<fixture>.<op>)
+#   subscribe      the client runs as a named container the server can
+#                  notify; once the server reports subscription-created,
+#                  call issue-control makes it change the subscribed list
 #   unprovisioned  a device of the same CA that the server has not
 #                  provisioned is not registered (register is not ok)
 #   other-ca       a device certificate of another CA is refused (exit 3)
@@ -31,8 +37,7 @@ source "${SCRIPT_DIR}/lib.sh"
 [[ $# -ge 1 ]] || { echo "usage: interop.sh <adapter> [<adapter> ...]" >&2; exit 2; }
 ADAPTERS=("$@")
 read -r -a VERSIONS <<<"${IEEE20305_VERSIONS:-2018 2023}"
-FIXTURE="${ROOT}/fixtures/baseline/fixture.json"
-SERIAL=$(jq -r '.device.serial' "${FIXTURE}")
+SERIAL=$(jq -r '.device.serial' "${ROOT}/fixtures/baseline/fixture.json")
 require_tools
 WORK=$(mktemp -d)
 trap 'rm -rf "${WORK}"; cleanup' EXIT
@@ -78,7 +83,8 @@ keep() {
 record() {
     local id="$1" client="$2" server="$3" operation="$4" status="$5" ms="$6" note="${7:-}" bug
     if bug=$(known_bug "${client}" "${server}" "${id}"); then
-        echo "${bug%%$'\t'*}" >> "${WORK}/known-ran"
+        # Only a test that ran can show that an entry no longer reproduces.
+        [[ "${status}" == PASS || "${status}" == FAIL ]] && echo "${bug%%$'\t'*}" >> "${WORK}/known-ran"
         if [[ "${status}" == FAIL ]]; then
             status=KNOWN_ISSUE; note="${note} (known: ${bug#*$'\t'})"
             echo "${bug%%$'\t'*}" >> "${WORK}/known-hit"
@@ -97,82 +103,139 @@ record() {
         + (if $note != "" and $st != "PASS" then {note: $note} else {} end)' >> "${WORK}/results.jsonl"
 }
 
-# ---- the throwaway PKI: one server certificate for every server name ----
-srv_names=()
-for a in "${ADAPTERS[@]}"; do srv_names+=("srv-${a}-${RUN_ID}"); done
-make_pki "${WORK}/pki" "${SERIAL}" "${srv_names[@]}" localhost || { log "cannot generate the TLS material"; exit 1; }
+# ---- the throwaway PKI: one server certificate for every server name, one
+# notification-listener certificate for every client name ----
+srv_names=() cli_names=()
+for a in "${ADAPTERS[@]}"; do srv_names+=("srv-${a}-${RUN_ID}"); cli_names+=("sub-${a}-${RUN_ID}"); done
+make_pki "${WORK}/pki" "${SERIAL}" "${srv_names[@]}" localhost -- "${cli_names[@]}" || { log "cannot generate the TLS material"; exit 1; }
 TLS=(-v "${WORK}/pki:/tls:ro")
+UNPROVISIONED_LFDI=$(lfdi_of "${WORK}/pki/unprovisioned/client.crt")
 
-# run_op <client> <server> <test id> <operation> <tls dir> <server container>:
-# prints the result document, returns the exit code.
+# run_op <client> <server container> <operation> <tls dir> <fixture>: prints
+# the result document, returns the exit code.
 run_op() {
-    run_client "$1" "${TLS[@]}" -- "$4" --version "${CURRENT_VERSION}" --url "https://$6:443/dcap" --tls-dir "/tls/$5" --connect-timeout-ms 5000
+    run_client "$1" "${TLS[@]}" -- "$3" --version "${CURRENT_VERSION}" --url "https://$2:443/dcap" --tls-dir "/tls/$4" \
+        --fixture "/fixtures/$5/fixture.json" --connect-timeout-ms 5000
 }
 
+# fixtures_of <adapter> <role>: the baked fixtures the role declares
+# (baseline when it declares none).
+fixtures_of() { jq -r --arg v "${CURRENT_VERSION}" --arg r "$2" '.versions[$v][$r].fixtures // ["baseline"] | .[]' "${WORK}/caps-$1.json"; }
+role_has() {  # role_has <adapter> <role> <key> <value>
+    jq -e --arg v "${CURRENT_VERSION}" --arg r "$2" --arg k "$3" --arg x "$4" '.versions[$v][$r][$k] // [] | index($x)' "${WORK}/caps-$1.json" >/dev/null 2>&1
+}
+
+# test_id <fixture> <name>: V.<name> for the baseline, V.<fixture>.<name> otherwise.
+test_id() { if [[ "$1" == baseline ]]; then echo "${CURRENT_VERSION}.$2"; else echo "${CURRENT_VERSION}.$1.$2"; fi; }
+
+# judge <test id> <client> <server> <operation> <t0> <code> <doc>: PASS on ok,
+# SKIP_UNSUPPORTED on an unsupported result, FAIL otherwise.
+judge() {
+    local id="$1" client="$2" server="$3" op="$4" t0="$5" code="$6" doc="$7"
+    keep "${id}-${client}-${server}" "${doc}"
+    if [[ "${code}" == 0 ]] && jq -e '.ok == true' <<<"${doc}" >/dev/null 2>&1; then
+        record "${id}" "${client}" "${server}" "${op}" PASS $(( $(now_ms) - t0 ))
+    elif [[ "${code}" == 5 ]] && jq -e '.error.code == "unsupported"' <<<"${doc}" >/dev/null 2>&1; then
+        record "${id}" "${client}" "${server}" "${op}" SKIP_UNSUPPORTED 0 "$(jq -r '.error.detail' <<<"${doc}")"
+    else
+        record "${id}" "${client}" "${server}" "${op}" FAIL $(( $(now_ms) - t0 )) "exit ${code}: ${doc:0:300}"
+    fi
+}
+
+OPERATIONS=(register discover poll-controls report subscribe respond log-event put-der flow-reservation poll-pricing)
+
 pairing() {
-    local client="$1" server="$2"
-    local srv="srv-${server}-${RUN_ID}" ciphers op doc code t0 id
+    local client="$1" server="$2" fixture="$3"
+    local srv="srv-${server}-${RUN_ID}" sub="sub-${client}-${RUN_ID}" ciphers op doc code t0 id trigger
     if ! declares "${client}" "${CURRENT_VERSION}" '.client.supported == true' \
        || ! declares "${server}" "${CURRENT_VERSION}" '.server.supported == true'; then
         return
     fi
+    if ! fixtures_of "${server}" server | grep -qx "${fixture}" || ! fixtures_of "${client}" client | grep -qx "${fixture}"; then
+        [[ "${fixture}" == baseline ]] || record "$(test_id "${fixture}" fixture)" "${client}" "${server}" "" SKIP_UNSUPPORTED 0 \
+            "the fixture ${fixture} is not declared by both: ${server} server $(fixtures_of "${server}" server | tr '\n' ' '), ${client} client $(fixtures_of "${client}" client | tr '\n' ' ')"
+        return
+    fi
     ciphers=$(common_ciphers "${client}" "${server}")
     if [[ -z "${ciphers}" ]]; then
-        record "${CURRENT_VERSION}.tls" "${client}" "${server}" "" SKIP_UNSUPPORTED 0 \
+        [[ "${fixture}" == baseline ]] && record "${CURRENT_VERSION}.tls" "${client}" "${server}" "" SKIP_UNSUPPORTED 0 \
             "no TLS cipher suite in common: ${client} offers $(caps "${client}" | jq -r '.tls.cipherSuites | join(",")'), ${server} $(caps "${server}" | jq -r '.tls.cipherSuites | join(",")')"
         return
     fi
-    log "IEEE 2030.5 ${CURRENT_VERSION}: ${client} -> ${server} (${ciphers})"
-    start "${srv}" "${server}" "${TLS[@]}" -- server --version "${CURRENT_VERSION}" --tls-dir /tls/server
+    log "IEEE 2030.5 ${CURRENT_VERSION}, fixture ${fixture}: ${client} -> ${server} (${ciphers})"
+    start "${srv}" "${server}" "${TLS[@]}" -- server --version "${CURRENT_VERSION}" --tls-dir /tls/server --fixture "/fixtures/${fixture}/fixture.json"
     if ! wait_ready "${srv}"; then
-        record "${CURRENT_VERSION}.ready" "${client}" "${server}" "" INFRA_ERROR 0 "the server did not become ready"
+        record "$(test_id "${fixture}" ready)" "${client}" "${server}" "" INFRA_ERROR 0 "the server did not become ready"
         stop_container "${srv}"; return
     fi
 
-    for op in register discover poll-controls report subscribe; do
-        id="${CURRENT_VERSION}.${op}"
+    for op in "${OPERATIONS[@]}"; do
+        id=$(test_id "${fixture}" "${op}")
         if ! operations_of "${client}" "${CURRENT_VERSION}" | grep -qx "${op}"; then
             record "${id}" "${client}" "${server}" "${op}" SKIP_UNSUPPORTED 0 "${client} does not declare the client operation ${op}"; continue
         fi
-        if ! jq -e --arg v "${CURRENT_VERSION}" --arg op "${op}" '.versions[$v].server.operations | index($op)' "${WORK}/caps-${server}.json" >/dev/null 2>&1; then
+        if ! role_has "${server}" server operations "${op}"; then
             record "${id}" "${client}" "${server}" "${op}" SKIP_UNSUPPORTED 0 "${server} does not declare the server operation ${op}"; continue
         fi
         t0=$(now_ms)
-        doc=$(run_op "${client}" "${server}" "${id}" "${op}" client "${srv}"); code=$?
-        keep "${id}-${client}-${server}" "${doc}"
-        if [[ "${code}" == 0 ]] && jq -e '.ok == true' <<<"${doc}" >/dev/null 2>&1
-        then record "${id}" "${client}" "${server}" "${op}" PASS $(( $(now_ms) - t0 ))
-        else record "${id}" "${client}" "${server}" "${op}" FAIL $(( $(now_ms) - t0 )) "exit ${code}: ${doc:0:300}"; fi
+        if [[ "${op}" == subscribe ]]; then
+            trigger=no; role_has "${server}" server calls issue-control && trigger=yes
+            doc=$(run_subscribe "${client}" "${sub}" "${srv}" "${trigger}" "${TLS[@]}" -- --version "${CURRENT_VERSION}" \
+                --url "https://${srv}:443/dcap" --tls-dir /tls/client --fixture "/fixtures/${fixture}/fixture.json" \
+                --connect-timeout-ms 5000 --timeout-ms 30000); code=$?
+        else
+            doc=$(run_op "${client}" "${srv}" "${op}" client "${fixture}"); code=$?
+        fi
+        judge "${id}" "${client}" "${server}" "${op}" "${t0}" "${code}" "${doc}"
+        if [[ "${op}" == subscribe && "${code}" == 0 ]]; then
+            id=$(test_id "${fixture}" events.subscription-created)
+            if wait_event "${srv}" '.event == "subscription-created" and (.resource | type == "string") and (.sfdi | type == "string" or type == "number")' >/dev/null
+            then record "${id}" "${client}" "${server}" "" PASS 0
+            else record "${id}" "${client}" "${server}" "" FAIL 0 "a subscription was created and notified, without a subscription-created event"; fi
+        fi
     done
 
-    if operations_of "${client}" "${CURRENT_VERSION}" | grep -qx register; then
-        id="${CURRENT_VERSION}.register.unprovisioned"; t0=$(now_ms)
-        doc=$(run_op "${client}" "${server}" "${id}" register unprovisioned "${srv}"); code=$?
-        keep "${id}-${client}-${server}" "${doc}"
-        if [[ "${code}" != 0 ]] && jq -e '.ok == false' <<<"${doc}" >/dev/null 2>&1
-        then record "${id}" "${client}" "${server}" register PASS $(( $(now_ms) - t0 ))
-        else record "${id}" "${client}" "${server}" register FAIL $(( $(now_ms) - t0 )) "an unprovisioned device was registered: exit ${code}: ${doc:0:300}"; fi
+    if [[ "${fixture}" == baseline ]]; then
+        if operations_of "${client}" "${CURRENT_VERSION}" | grep -qx register; then
+            id="${CURRENT_VERSION}.register.unprovisioned"; t0=$(now_ms)
+            doc=$(run_op "${client}" "${srv}" register unprovisioned "${fixture}"); code=$?
+            keep "${id}-${client}-${server}" "${doc}"
+            if [[ "${code}" != 0 ]] && jq -e '.ok == false' <<<"${doc}" >/dev/null 2>&1
+            then record "${id}" "${client}" "${server}" register PASS $(( $(now_ms) - t0 ))
+            else record "${id}" "${client}" "${server}" register FAIL $(( $(now_ms) - t0 )) "an unprovisioned device was registered: exit ${code}: ${doc:0:300}"; fi
+            # A server that let the device create its EndDevice reports it.
+            if role_has "${server}" server events device-registered && jq -e '.response.status == 201' <<<"${doc}" >/dev/null 2>&1; then
+                id="${CURRENT_VERSION}.events.device-registered"
+                if wait_event "${srv}" '.event == "device-registered" and .lfdi == $l' --arg l "${UNPROVISIONED_LFDI}" >/dev/null
+                then record "${id}" "${client}" "${server}" "" PASS 0
+                else record "${id}" "${client}" "${server}" "" FAIL 0 "no device-registered event for the unprovisioned device ${UNPROVISIONED_LFDI}"; fi
+            fi
+        fi
+
+        id="${CURRENT_VERSION}.mtls.other-ca"; t0=$(now_ms)
+        doc=$(run_op "${client}" "${srv}" discover other-ca "${fixture}"); code=$?
+        if [[ "${code}" == 3 ]] && jq -e '.error.code == "connect-failed"' <<<"${doc}" >/dev/null 2>&1
+        then record "${id}" "${client}" "${server}" discover PASS $(( $(now_ms) - t0 ))
+        else record "${id}" "${client}" "${server}" discover FAIL $(( $(now_ms) - t0 )) "a device of another CA was not refused: exit ${code}: ${doc:0:300}"; fi
     fi
 
-    id="${CURRENT_VERSION}.mtls.other-ca"; t0=$(now_ms)
-    doc=$(run_op "${client}" "${server}" "${id}" discover other-ca "${srv}"); code=$?
-    if [[ "${code}" == 3 ]] && jq -e '.error.code == "connect-failed"' <<<"${doc}" >/dev/null 2>&1
-    then record "${id}" "${client}" "${server}" discover PASS $(( $(now_ms) - t0 ))
-    else record "${id}" "${client}" "${server}" discover FAIL $(( $(now_ms) - t0 )) "a device of another CA was not refused: exit ${code}: ${doc:0:300}"; fi
-
     if events "${srv}" | grep -v '^{' | grep -q .; then
-        record "${CURRENT_VERSION}.events.json-lines" "${client}" "${server}" "" FAIL 0 "server stdout has lines that are not JSON"
+        record "$(test_id "${fixture}" events.json-lines)" "${client}" "${server}" "" FAIL 0 "server stdout has lines that are not JSON"
     fi
     stop_container "${srv}"
 }
 
+FIXTURES=()
+for f in "${ROOT}"/fixtures/*/fixture.json; do FIXTURES+=("$(basename "$(dirname "${f}")")"); done
 CURRENT_VERSION=""
-log "adapters: ${ADAPTERS[*]} (${VERSION}), IEEE 2030.5 ${VERSIONS[*]}"
+log "adapters: ${ADAPTERS[*]} (${VERSION}), IEEE 2030.5 ${VERSIONS[*]}, fixtures ${FIXTURES[*]}"
 for v in "${VERSIONS[@]}"; do
     CURRENT_VERSION="${v}"
-    for server in "${ADAPTERS[@]}"; do
-        for client in "${ADAPTERS[@]}"; do
-            pairing "${client}" "${server}"
+    for fixture in "${FIXTURES[@]}"; do
+        for server in "${ADAPTERS[@]}"; do
+            for client in "${ADAPTERS[@]}"; do
+                pairing "${client}" "${server}" "${fixture}"
+            done
         done
     done
 done

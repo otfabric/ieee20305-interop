@@ -31,7 +31,7 @@ const (
 
 const (
 	adapterName     = "gridappsd"
-	contractVersion = "0.2"
+	contractVersion = "0.3"
 	defaultFixture  = "/fixtures/baseline/fixture.json"
 	defaultReady    = "/run/ieee20305-interop/ready"
 )
@@ -77,7 +77,7 @@ func run(args []string) int {
 	case "client":
 		return runClient(args[1:])
 	case "call":
-		err = codedError{exitUnsupported, fmt.Errorf("call: the control socket is not implemented by the %s adapter", adapterName)}
+		return runCall(args[1:])
 	case "print-capabilities":
 		err = printCapabilities(args[1:])
 	case "print-fixture":
