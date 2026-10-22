@@ -1,0 +1,92 @@
+# Machine-readable version manifest for ieee20305-interop.
+# Upstream pins and base image digests are release inputs; nothing floats.
+# The Dockerfiles are the source of truth for a build:
+# scripts/check-versions.sh fails when this file disagrees with them.
+
+interop_version: "0.1.0"
+contract_version: "0.1"        # docs/CONTAINER_CONTRACT.md (draft until 1.0); documents carry schemaVersion "1.0"
+fixture_schema: "1.0"          # fixtures/baseline/fixture.json
+
+protocol:
+  name: "IEEE 2030.5"
+  versions: ["2018", "2023"]
+  profiles: ["CSIP", "CSIP-AUS"]
+  default_port: 443            # inside the images; HTTPS with mTLS
+  path: "/dcap"
+
+implementations:
+  epri:
+    priority: P0
+    status: planned
+    upstream: "EPRI IEEE 2030.5 Client"
+    repository: "https://github.com/epri-dev/IEEE-2030.5-Client"
+    version: "planned"
+    license: "BSD-3-Clause"
+    language: "C"
+    independent_engine: true
+    roles: [client]
+    versions_claimed: ["2018"]
+    note: >-
+      EPRI's reference client implementation for IEEE 2030.5. Written in C
+      with mTLS support. Implements the client (EndDevice) role for device
+      registration, DER program discovery and control polling.
+
+  envoy:
+    priority: P0
+    status: planned
+    upstream: "ANU Envoy"
+    repository: "https://github.com/bsgip/envoy"
+    version: "planned"
+    license: "MIT"
+    language: "Python"
+    independent_engine: true
+    roles: [server]
+    versions_claimed: ["2018", "2023"]
+    profiles_claimed: ["CSIP-AUS"]
+    note: >-
+      ANU/BSGIP Envoy is a Python/FastAPI IEEE 2030.5 server with a focus
+      on the CSIP-AUS profile for Australian DER integration. It serves as
+      the utility server (aggregator) role, managing EndDevice registrations,
+      DER programs and DER controls.
+
+  py20305:
+    priority: P0
+    status: planned
+    upstream: "DER Security py20305 / Project Satori"
+    repository: "https://github.com/DERSecurity/py20305"
+    version: "planned"
+    license: "Apache-2.0"
+    language: "Python"
+    independent_engine: true
+    roles: [client]
+    versions_claimed: ["2018", "2023"]
+    note: >-
+      py20305 (Project Satori) is a Python IEEE 2030.5 client from DER
+      Security. It implements the EndDevice role with certificate-based
+      identity (LFDI/SFDI) and supports device registration, DER program
+      discovery, control polling and metering reports.
+
+  gridappsd:
+    priority: P0
+    status: planned
+    upstream: "GridAPPS-D/PNNL IEEE 2030.5"
+    repository: "https://github.com/GRIDAPPSD/ieee-2030_5-server-go"
+    version: "planned"
+    license: "BSD-2-Clause"
+    language: "Go"
+    independent_engine: true
+    roles: [server, client]
+    versions_claimed: ["2018"]
+    note: >-
+      GridAPPS-D from PNNL provides both a Go server
+      (ieee-2030_5-server-go) and a Go client (ieee-2030_5-client-go).
+      The server manages EndDevices and DER programs; the client
+      implements device registration and control polling.
+
+images:
+  epri: "ghcr.io/otfabric/ieee20305-interop-epri"
+  envoy: "ghcr.io/otfabric/ieee20305-interop-envoy"
+  py20305: "ghcr.io/otfabric/ieee20305-interop-py20305"
+  gridappsd: "ghcr.io/otfabric/ieee20305-interop-gridappsd"
+
+platforms: ["linux/amd64", "linux/arm64"]

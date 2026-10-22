@@ -1,0 +1,10 @@
+# Known upstream defects (REQUIREMENTS.md R4.4). Tab-separated:
+# adapter[:role][@peer]	upstream_version	test_id_regex	evidence_url	summary
+# role is client or server: the bug is in that role of the adapter only; without
+# it, in either role. @peer: it shows only when that adapter is at the other end
+# (for example because only that peer offers what triggers it). The upstream
+# version is the pin of versions.yaml. The test id regex matches the test ids of
+# scripts/interop.sh. The evidence URL points to the upstream issue or commit.
+#
+# A known-bug entry that does not reproduce in a run where its tests ran is a
+# stale entry, and fails the run (scripts/interop.sh).

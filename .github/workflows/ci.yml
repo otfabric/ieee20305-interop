@@ -1,0 +1,50 @@
+name: CI
+run-name: "CI (${{ github.event_name }}) on ${{ github.ref_name }} by @${{ github.actor }}"
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Nothing is pulled from Docker Hub: anonymous pulls are rate limited per
+  # runner address and its token service times out under load. Base images
+  # (pinned by digest) and build tooling come from Google's mirror of it, and
+  # every registry operation is retried on transient failures (scripts/retry.sh).
+  BASE_REGISTRY: mirror.gcr.io/library
+  TOOLS_REGISTRY: mirror.gcr.io
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Fixtures, schemas, versions, scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install jsonschema
+      - name: versions.yaml matches the build files
+        run: make versions
+      - name: Schemas
+        run: make schemas
+      - name: Fixtures
+        run: make fixtures
+      - name: Shellcheck
+        run: make lint
+      - name: No reference to a library under test
+        # REQUIREMENTS.md R1: adapters, fixtures, schemas, scripts and tests
+        # must not know any consumer. Documentation may name consumers.
+        run: |
+          if grep -rInE 'otfabric/go-|go-ieee20305|ieee20305ctl' adapters fixtures schemas scripts tests Makefile compose.yaml; then
+            echo "::error::consumer-specific reference found"; exit 1
+          fi

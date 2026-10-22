@@ -1,0 +1,22 @@
+# Test cases for ieee20305-interop. Tab-separated.
+# id	description	operation	from	ieee20305_version
+register.baseline	Register the fixture EndDevice with the server	register	client	2018
+register.duplicate	Register an already-registered EndDevice	register	client	2018
+register.unknown-cert	Register with a certificate the server does not trust	register	client	2018
+register.wrong-pin	Register with an incorrect PIN	register	client	2018
+discover.dcap	Discover DeviceCapability resource	discover	client	2018
+discover.edev-list	Discover EndDeviceList after registration	discover	client	2018
+discover.der-program	Discover DERProgramList for the registered device	discover	client	2018
+discover.time	Discover Time resource	discover	client	2018
+poll-controls.active	Poll active DERControls for the device	poll-controls	client	2018
+poll-controls.empty	Poll controls when no program is active	poll-controls	client	2018
+poll-controls.expired	Poll controls after all have expired	poll-controls	client	2018
+report.meter-reading	POST a MeterReading to the server	report	client	2018
+report.der-status	POST a DERStatus to the server	report	client	2018
+report.der-availability	POST DERAvailability to the server	report	client	2018
+subscribe.der-controls	Subscribe to DERControl updates	subscribe	client	2018
+subscribe.der-program	Subscribe to DERProgram changes	subscribe	client	2018
+register.baseline.2023	Register the fixture EndDevice (2023 edition)	register	client	2023
+discover.dcap.2023	Discover DeviceCapability (2023 edition)	discover	client	2023
+poll-controls.active.2023	Poll active DERControls (2023 edition)	poll-controls	client	2023
+report.meter-reading.2023	POST a MeterReading (2023 edition)	report	client	2023

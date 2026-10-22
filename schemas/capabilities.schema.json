@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/otfabric/ieee20305-interop/schemas/capabilities.schema.json",
+  "title": "ieee20305-interop adapter capabilities",
+  "description": "The document `ieee20305-interop print-capabilities` writes. See docs/CAPABILITIES.md.",
+  "type": "object",
+  "required": ["schemaVersion", "adapter", "adapterVersion", "contractVersion", "upstream", "versions"],
+  "additionalProperties": true,
+  "properties": {
+    "schemaVersion": {"const": "1.0"},
+    "adapter": {"type": "string", "pattern": "^[a-z0-9]+$"},
+    "adapterVersion": {"type": "string", "minLength": 1},
+    "contractVersion": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+$"},
+    "upstream": {
+      "type": "object",
+      "required": ["name", "repository", "version", "revision", "license", "language", "independentEngine"],
+      "properties": {
+        "name": {"type": "string"},
+        "repository": {"type": "string", "format": "uri"},
+        "version": {"type": "string"},
+        "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "license": {"type": "string"},
+        "language": {"type": "string"},
+        "independentEngine": {"type": "boolean"}
+      }
+    },
+    "versions": {
+      "type": "object",
+      "propertyNames": {"enum": ["2018", "2023"]},
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/version"}
+    }
+  },
+  "$defs": {
+    "operation": {
+      "type": "string",
+      "enum": ["register", "discover", "poll-controls", "report", "subscribe"]
+    },
+    "role": {
+      "type": "object",
+      "description": "What the adapter does in one role for one IEEE 2030.5 version.",
+      "required": ["supported", "operations"],
+      "properties": {
+        "supported": {"type": "boolean"},
+        "operations": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/operation"},
+          "uniqueItems": true
+        }
+      }
+    },
+    "version": {
+      "type": "object",
+      "required": ["client", "server", "features"],
+      "properties": {
+        "client": {"$ref": "#/$defs/role"},
+        "server": {"$ref": "#/$defs/role"},
+        "features": {
+          "type": "object",
+          "required": ["mTLS", "csip", "csipAus", "subscription"],
+          "properties": {
+            "mTLS": {"type": "boolean", "description": "Mutual TLS with device certificates (LFDI/SFDI identity)"},
+            "csip": {"type": "boolean", "description": "Common Smart Inverter Profile (CSIP) compliance"},
+            "csipAus": {"type": "boolean", "description": "CSIP-AUS (Australian) profile compliance"},
+            "subscription": {"type": "boolean", "description": "IEEE 2030.5 Subscription/Notification mechanism"}
+          },
+          "additionalProperties": {"type": "boolean"}
+        },
+        "notes": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}
