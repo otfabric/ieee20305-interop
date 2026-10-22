@@ -1,0 +1,9 @@
+# The runtime dependencies of py20305 v0.16.0 (pyproject.toml, no extras),
+# and what builds its wheel. Locked, with hashes, by: make lock-py20305
+aiohttp>=3.9
+cryptography>=42.0
+pydantic>=2.6
+xsdata-pydantic>=24.0
+lxml>=5.0
+setuptools>=68.0
+wheel

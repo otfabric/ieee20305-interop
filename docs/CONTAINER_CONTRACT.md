@@ -2,8 +2,8 @@
 
 Version: **0.2 (draft)**. `contract_version` in [versions.yaml](../versions.yaml).
 
-> Implemented by the `gridappsd` adapter (server and client, without `call`,
-> `client run` and `subscribe`). It stays a draft (0.x) until the adapters
+> Implemented by the `gridappsd` (server and client) and `py20305` (client)
+> adapters, without `call`, `client run` and `subscribe`. It stays a draft (0.x) until the adapters
 > together implement every part of it;
 > [Gaps before 1.0](#gaps-before-10) lists what is missing. Until 1.0 it may
 > change without a major version bump.
@@ -309,8 +309,8 @@ this repository. An unknown name is exit 1. See [docs/FIXTURES.md](FIXTURES.md).
       `request-received`) are reserved only.
 - [ ] CSIP-AUS behaviour (connection points, site limits) is not
       exercised by any fixture.
-- [ ] Only one server and one client upstream so far; the contract is not
-      yet shaped by a second implementation of either role.
+- [ ] One server upstream so far; the server side of the contract is not
+      yet shaped by a second implementation.
 
 ## Changes
 

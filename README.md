@@ -15,7 +15,7 @@ against real implementation diversity without owning any of it.
 |---|---|---|---|---|---|
 | `epri` | [EPRI IEEE 2030.5 Client](https://github.com/epri-dev/IEEE-2030.5-Client) | C | client | BSD-3-Clause | planned |
 | `envoy` | [ANU Envoy](https://github.com/bsgip/envoy) | Python | server | MIT | planned |
-| `py20305` | [DER Security py20305](https://github.com/DERSecurity/py20305) | Python | client | Apache-2.0 | planned |
+| `py20305` | [DER Security py20305](https://github.com/DERSecurity/py20305) | Python | client | Apache-2.0 | implemented ([README](adapters/py20305/README.md)) |
 | `gridappsd` | [GridAPPS-D server](https://github.com/GRIDAPPSD/ieee-2030_5-server-go) and [client](https://github.com/GRIDAPPSD/ieee-2030_5-client-go) | Go | both | Battelle BSD | implemented ([README](adapters/gridappsd/README.md)) |
 
 ## Quick start

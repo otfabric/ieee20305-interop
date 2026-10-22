@@ -128,6 +128,8 @@ func printCapabilities(args []string) error {
 			"TLS: TLS 1.2 with TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 only, in both roles, through the GridAPPS-D fork of crypto/tls; a peer that does not offer CCM_8 cannot connect.",
 			"Server: devices are provisioned by LFDI from the certificates of --tls-dir/devices; the fixture's programs and controls are issued through the sep2server admin API to a device-only FSA, so the server picks its href and keeps the fixture's description and primacy.",
 			"Server: DERControlBase opModFixedW is not supported by the sep2server admin API.",
+			"Client: verifies the server's certificate chain, not its host name: IEEE 2030.5 server certificates need not carry one (internal/inverter/client.go, GRIDAPPSD/ieee-2030_5-server-go#32).",
+			"Server: the DefaultDERControl is served without the fixture's description: the sep2server admin API does not accept one for kind default.",
 			"Subscriptions and the control socket are not implemented by this adapter yet.",
 		},
 	}

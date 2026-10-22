@@ -30,7 +30,8 @@ otfabric/go-ieee20305, is in that repository's IMPLEMENTATION_PLAN.md.
       server, with TLS material generated per run
 - [x] Contract 0.2: mutual TLS everywhere, servers seeded by the fixture,
       TLS capabilities
-- [ ] `py20305` adapter: Python client (v0.16.0), GCM and CCM_8
+- [x] `py20305` adapter: Python client (v0.16.0), GCM and CCM_8, with a
+      hashed dependency lock
 - [ ] `envoy` adapter: Python server (v2.5.0) with PostgreSQL and a TLS
       proxy that forwards the client certificate, CSIP-AUS
 - [ ] `epri` adapter: C client, CCM_8 only

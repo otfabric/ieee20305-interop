@@ -32,7 +32,7 @@ BUILDER ?= ieee20305-interop
 
 # Adapters with an image, in priority order. The self-tests run over all of
 # them; override to work on one: make smoke ADAPTERS=epri
-ADAPTERS ?= gridappsd
+ADAPTERS ?= gridappsd py20305
 
 image = $(REGISTRY)/ieee20305-interop-$(1)
 
@@ -41,7 +41,7 @@ export REGISTRY VERSION
 # image-%, smoke-%, run-% and candidate-% are pattern rules, which make
 # ignores for .PHONY targets: they depend on FORCE instead.
 .PHONY: help all ci validate versions schemas fixtures lint images smoke interop \
-        capabilities pki buildx-setup buildx publish publish-arch publish-manifest digests documents run-% clean FORCE
+        capabilities pki lock-py20305 buildx-setup buildx publish publish-arch publish-manifest digests documents run-% clean FORCE
 FORCE:
 
 help: ## Show this help
@@ -117,6 +117,17 @@ smoke-%: FORCE ## Smoke test one adapter, e.g. smoke-epri
 interop: ## Cross-stack self-test: every client against every server
 	@scripts/interop.sh $(ADAPTERS)
 
+# ── Dependency locks ──────────────────────────────────────────────────────────
+
+UV_VERSION ?= 0.13.5
+
+lock-py20305: ## Regenerate adapters/py20305/requirements.txt (hashed) from requirements.in
+	@$(RETRY) docker run --rm -v "$$(pwd)/adapters/py20305:/w" -w /w $(BASE_REGISTRY)/python:3.13-slim-trixie \
+		sh -c 'pip install -q --root-user-action=ignore --disable-pip-version-check uv==$(UV_VERSION) && \
+		       uv pip compile -q --universal --python-version 3.13 --generate-hashes --no-header \
+		       --output-file requirements.txt requirements.in'
+	@echo "adapters/py20305/requirements.txt updated"
+
 # ── Upstream candidates ───────────────────────────────────────────────────────
 
 CANDIDATE_VERSION ?=
@@ -141,9 +152,9 @@ capabilities: ## Print the capability document of every adapter
 
 RUN_PORT ?= 8443
 
-pki: ## Write a throwaway PKI to ./tls for compose.yaml and run-% (server names localhost, 127.0.0.1)
+pki: ## Write a throwaway PKI to ./tls for compose.yaml and run-% (server names: the compose services, localhost, 127.0.0.1)
 	@rm -rf tls
-	@bash -c 'source scripts/lib.sh && make_pki tls "$$(jq -r .device.serial fixtures/baseline/fixture.json)" localhost 127.0.0.1' \
+	@bash -c 'source scripts/lib.sh && make_pki tls "$$(jq -r .device.serial fixtures/baseline/fixture.json)" gridappsd-server localhost 127.0.0.1' \
 		&& echo "./tls: server/ (with devices/), client/, unprovisioned/, other-ca/, untrusted/"
 
 run-%: FORCE ## Run one reference server on 127.0.0.1:$(RUN_PORT) with ./tls (make pki first), e.g. run-gridappsd

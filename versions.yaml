@@ -61,22 +61,26 @@ implementations:
 
   py20305:
     priority: P0
-    status: planned
+    status: implemented
     upstream: "DER Security py20305 / Project Satori"
     repository: "https://github.com/DERSecurity/py20305"
-    version: "planned"
+    version: "v0.16.0"
+    revision: "79844938eea3d05f5432cdc5f2d07a103e87912b"
+    base_images:
+      PYTHON_DIGEST: "sha256:57b29a7c050c4e679e4bea572e14b3965cf4b5839de2da49d55e49ffc4024f39"   # python:3.13-slim-trixie
+    dependency_lock: "adapters/py20305/requirements.txt"
     license: "Apache-2.0"
     language: "Python"
     independent_engine: true
     roles: [client]
     versions_claimed: ["2018", "2023"]
-    candidate: "v0.16.0, commit 79844938eea3d05f5432cdc5f2d07a103e87912b (PyPI py20305 0.16.0; no lock file)"
+    tls_cipher_suites: ["TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8"]
     note: >-
-      py20305 (Project Satori), an active Python IEEE 2030.5 client with an
-      async API (CsipClient): discovery, EndDevice registration, program and
-      control polling, MirrorUsagePoint metering and subscriptions, with
-      CSIP-AUS models. TLS through Python's ssl (OpenSSL), offering
-      ECDHE-ECDSA AES-256-GCM and CCM_8.
+      Installed from the pinned source with every dependency from a hashed
+      lock (uv pip compile). The adapter drives the py20305 engine:
+      CsipClient discovery and registration, and its models for the
+      MirrorUsagePoint. It verifies the server's host name. No lock file
+      upstream, so the lock is this repository's.
 
   gridappsd:
     priority: P0

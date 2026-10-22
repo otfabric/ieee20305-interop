@@ -105,7 +105,7 @@ operations it serves to a client.
 |---------|--------|-------|----------|---------------|
 | `gridappsd` | implemented | client, server | 2018, 2023 | CCM_8 |
 | `envoy` | planned | server | | |
-| `py20305` | planned | client | | |
+| `py20305` | implemented | client | 2018, 2023 | AES-256-GCM, CCM_8 |
 | `epri` | planned | client | | |
 
 See [versions.yaml](../versions.yaml) for the pins and the candidates.
