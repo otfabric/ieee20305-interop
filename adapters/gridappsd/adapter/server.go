@@ -368,6 +368,7 @@ func (a *adminClient) call(ctx context.Context, method, path string, body any, o
 // program, default control and controls.
 func provision(ctx context.Context, a *adminClient, f *Fixture, devices []provisionedDevice) error {
 	program := f.DERPrograms[0]
+	now := time.Now().Unix()
 	for _, d := range devices {
 		var created struct {
 			Href string `json:"href"`
@@ -400,6 +401,7 @@ func provision(ctx context.Context, a *adminClient, f *Fixture, devices []provis
 		for _, c := range program.Controls {
 			if err := issue(map[string]any{
 				"kind": "scheduled", "functions": c.Base, "durationSeconds": c.Duration, "description": c.Description,
+				"startTime": now + int64(c.Start),
 			}); err != nil {
 				return err
 			}

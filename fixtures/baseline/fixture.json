@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "name": "baseline",
-  "description": "One device, one DER program with a default control and two controls, and one metering report. Covers registration, discovery, control polling and metering.",
+  "description": "One device, one DER program with two scheduled controls that every IEEE 2030.5 server can issue (connect and energize, then disconnect), and one metering report. Covers registration, discovery, control polling and metering.",
   "device": {
     "serial": "ieee20305-interop-device-1",
     "pin": 111115,
@@ -12,14 +12,6 @@
       "mRID": "A0000000000000000000000000000001",
       "description": "Baseline DER program",
       "primacy": 1,
-      "defaultControl": {
-        "mRID": "A0000000000000000000000000000002",
-        "description": "Connected and energized",
-        "base": {
-          "opModConnect": true,
-          "opModEnergize": true
-        }
-      },
       "controls": [
         {
           "mRID": "A0000000000000000000000000000003",
@@ -28,15 +20,17 @@
             "opModConnect": true,
             "opModEnergize": true
           },
-          "duration": 3600
+          "duration": 3600,
+          "start": 0
         },
         {
           "mRID": "A0000000000000000000000000000004",
-          "description": "Active power at most 50 percent",
+          "description": "Disconnect",
           "base": {
-            "opModMaxLimW": 5000
+            "opModConnect": false
           },
-          "duration": 1800
+          "duration": 1800,
+          "start": 3600
         }
       ]
     }

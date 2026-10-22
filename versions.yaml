@@ -39,25 +39,33 @@ implementations:
 
   envoy:
     priority: P0
-    status: planned
+    status: implemented
     upstream: "ANU Envoy"
     repository: "https://github.com/bsgip/envoy"
-    version: "planned"
+    version: "v2.5.0"
+    revision: "9d00340b5592f1fdf09dc74bd743fc251da0bfb5"
+    base_images:
+      PYTHON_DIGEST: "sha256:57b29a7c050c4e679e4bea572e14b3965cf4b5839de2da49d55e49ffc4024f39"   # python:3.13-slim-trixie
+    debian_packages:
+      HAPROXY_VERSION: "3.0.11-1+deb13u4"
+      POSTGRESQL_VERSION: "17.11-0+deb13u1"
+    dependency_lock: "Envoy's uv.lock (exported with hashes); adapters/envoy/build-requirements.txt"
     license: "MIT"
     language: "Python"
     independent_engine: true
     roles: [server]
-    versions_claimed: ["2018", "2023"]
+    versions_claimed: ["2018"]
     profiles_claimed: ["CSIP-AUS"]
-    candidate: "v2.5.0, commit 9d00340b5592f1fdf09dc74bd743fc251da0bfb5 (CSIP-AUS v1.3, envoy_schema 2.7.0; uv.lock with hashes)"
+    tls_cipher_suites: ["TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8", "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256", "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384"]
     note: >-
-      ANU/BSGIP Envoy, a Python/FastAPI IEEE 2030.5 server for CSIP-AUS.
-      Needs PostgreSQL (asyncpg, Alembic migrations) and does not terminate
-      TLS: a reverse proxy verifies the client certificate and passes it in
-      x-forwarded-client-cert. One image therefore bundles PostgreSQL,
-      nginx (mutual TLS, which can offer CCM_8 and GCM) and uvicorn.
-      ALLOW_DEVICE_REGISTRATION=true admits device certificates; programs
-      and controls are seeded as site control groups and site controls.
+      ANU/BSGIP Envoy, a Python/FastAPI IEEE 2030.5 server for CSIP-AUS
+      (envoy_schema 2.7.0). One image runs PostgreSQL (Envoy's Alembic
+      migrations), the Envoy server and admin applications under uvicorn,
+      and HAProxy, which terminates mutual TLS and forwards the client
+      certificate's SHA-256 fingerprint in x-forwarded-client-cert. Devices
+      are seeded as sites through Envoy's CRUD layer, programs and controls
+      through its admin API. ALLOW_DEVICE_REGISTRATION=true, so an
+      unprovisioned device registers itself with a PIN Envoy picks.
 
   py20305:
     priority: P0

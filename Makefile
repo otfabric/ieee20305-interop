@@ -32,7 +32,7 @@ BUILDER ?= ieee20305-interop
 
 # Adapters with an image, in priority order. The self-tests run over all of
 # them; override to work on one: make smoke ADAPTERS=epri
-ADAPTERS ?= gridappsd py20305
+ADAPTERS ?= gridappsd py20305 envoy
 
 image = $(REGISTRY)/ieee20305-interop-$(1)
 
@@ -41,7 +41,7 @@ export REGISTRY VERSION
 # image-%, smoke-%, run-% and candidate-% are pattern rules, which make
 # ignores for .PHONY targets: they depend on FORCE instead.
 .PHONY: help all ci validate versions schemas fixtures lint images smoke interop \
-        capabilities pki lock-py20305 buildx-setup buildx publish publish-arch publish-manifest digests documents run-% clean FORCE
+        capabilities pki lock-py20305 lock-envoy buildx-setup buildx publish publish-arch publish-manifest digests documents run-% clean FORCE
 FORCE:
 
 help: ## Show this help
@@ -128,6 +128,13 @@ lock-py20305: ## Regenerate adapters/py20305/requirements.txt (hashed) from requ
 		       --output-file requirements.txt requirements.in'
 	@echo "adapters/py20305/requirements.txt updated"
 
+lock-envoy: ## Regenerate adapters/envoy/build-requirements.txt (hashed); Envoy's own uv.lock pins the rest
+	@$(RETRY) docker run --rm -v "$$(pwd)/adapters/envoy:/w" -w /w $(BASE_REGISTRY)/python:3.13-slim-trixie \
+		sh -c 'pip install -q --root-user-action=ignore --disable-pip-version-check uv==$(UV_VERSION) && \
+		       uv pip compile -q --universal --python-version 3.13 --generate-hashes --no-header \
+		       --output-file build-requirements.txt build-requirements.in'
+	@echo "adapters/envoy/build-requirements.txt updated"
+
 # ── Upstream candidates ───────────────────────────────────────────────────────
 
 CANDIDATE_VERSION ?=
@@ -154,7 +161,7 @@ RUN_PORT ?= 8443
 
 pki: ## Write a throwaway PKI to ./tls for compose.yaml and run-% (server names: the compose services, localhost, 127.0.0.1)
 	@rm -rf tls
-	@bash -c 'source scripts/lib.sh && make_pki tls "$$(jq -r .device.serial fixtures/baseline/fixture.json)" gridappsd-server localhost 127.0.0.1' \
+	@bash -c 'source scripts/lib.sh && make_pki tls "$$(jq -r .device.serial fixtures/baseline/fixture.json)" gridappsd-server envoy-server localhost 127.0.0.1' \
 		&& echo "./tls: server/ (with devices/), client/, unprovisioned/, other-ca/, untrusted/"
 
 run-%: FORCE ## Run one reference server on 127.0.0.1:$(RUN_PORT) with ./tls (make pki first), e.g. run-gridappsd

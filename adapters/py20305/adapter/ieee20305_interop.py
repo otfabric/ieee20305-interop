@@ -401,12 +401,11 @@ async def op_poll_controls(client: Any, fixture: Fixture, result: Result, dcap_p
     fsa_link = edev.device.function_set_assignments_list_link
     result.request = {"method": "GET", "path": fsa_link.href if fsa_link else None}
     programs = []
-    served: set[tuple[str, str | None]] = set()
+    served: dict[str, list[Any]] = {}  # controls served, by program description
     for program in client.state.der_programs.values():
         description = program.program.description
         controls = [c.description for c in program.der_controls]
-        served.add((description, None))
-        served.update((description, c) for c in controls)
+        served.setdefault(description, []).extend(program.der_controls)
         programs.append({
             "description": description,
             "primacy": program.primacy,
@@ -417,15 +416,33 @@ async def op_poll_controls(client: Any, fixture: Fixture, result: Result, dcap_p
     result.response = {"status": 200, "body": {"derPrograms": programs}}
     if not programs:
         raise OperationError("server-error", "the device's function set assignments hold no DER program")
-    # The server was seeded with the fixture's programs and controls.
+    # The server was seeded with the fixture's programs and controls. A server
+    # picks its own mRIDs and may describe controls its own way, so programs
+    # are matched by description and controls by what they do.
     for program in fixture.der_programs:
-        if (program["description"], None) not in served:
+        if program["description"] not in served:
             raise OperationError("server-error", f"the server does not serve the fixture's DER program {program['description']!r}")
         for control in program["controls"]:
-            if (program["description"], control["description"]) not in served:
+            if not any(control_matches(control, dc) for dc in served[program["description"]]):
                 raise OperationError("server-error",
                                      f"the server does not serve the fixture's control {control['description']!r} "
                                      f"of {program['description']!r}")
+
+
+def control_matches(control: dict[str, Any], served: Any) -> bool:
+    """Whether a served DERControl has the fixture control's duration and DERControlBase values."""
+    interval, base = served.interval, served.dercontrol_base
+    if interval is None or interval.duration != control["duration"] or base is None:
+        return False
+
+    def value(v: Any) -> Any:
+        return getattr(v, "value", v)
+
+    got = {name: value(getattr(base, attr)) for name, attr in (
+        ("opModConnect", "op_mod_connect"), ("opModEnergize", "op_mod_energize"),
+        ("opModMaxLimW", "op_mod_max_lim_w"), ("opModFixedW", "op_mod_fixed_w"),
+    ) if getattr(base, attr, None) is not None}
+    return got == control["base"]
 
 
 async def op_report(client: Any, fixture: Fixture, result: Result, dcap_path: str) -> None:

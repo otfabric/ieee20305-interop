@@ -6,11 +6,14 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -236,7 +239,7 @@ func opPollControls(ctx context.Context, c *inverter.SEP2Client, f *Fixture, res
 		return err
 	}
 	var programs []map[string]any
-	seen := map[string]bool{} // descriptions of the programs and controls served
+	served := map[string][]sep2.DERControl{} // controls served, by program description
 	for _, fsa := range fsas.FunctionSetAssignments {
 		if fsa.DERProgramListLink == nil {
 			continue
@@ -247,7 +250,9 @@ func opPollControls(ctx context.Context, c *inverter.SEP2Client, f *Fixture, res
 		}
 		for _, p := range list.DERProgram {
 			entry := map[string]any{"program": p}
-			seen["program "+p.Description] = true
+			if _, ok := served[p.Description]; !ok {
+				served[p.Description] = nil
+			}
 			if p.DefaultDERControlLink != nil {
 				d, _, err := c.GetDefaultDERControl(ctx, p.DefaultDERControlLink.Href)
 				if err != nil {
@@ -261,9 +266,7 @@ func opPollControls(ctx context.Context, c *inverter.SEP2Client, f *Fixture, res
 					return err
 				}
 				entry["controls"] = controls.DERControl
-				for _, dc := range controls.DERControl {
-					seen["control "+p.Description+"/"+dc.Description] = true
-				}
+				served[p.Description] = append(served[p.Description], controls.DERControl...)
 				if len(controls.Rejected) > 0 {
 					entry["rejected"] = controls.Rejected
 				}
@@ -275,18 +278,52 @@ func opPollControls(ctx context.Context, c *inverter.SEP2Client, f *Fixture, res
 		return errors.New("the device's function set assignments hold no DER program")
 	}
 	res.Response = map[string]any{"status": 200, "body": map[string]any{"derPrograms": programs}}
-	// The server was seeded with the fixture's programs and controls.
+	// The server was seeded with the fixture's programs and controls. A
+	// server picks its own mRIDs and may describe controls its own way, so
+	// programs are matched by description and controls by what they do.
 	for _, p := range f.DERPrograms {
-		if !seen["program "+p.Description] {
+		controls, ok := served[p.Description]
+		if !ok {
 			return fmt.Errorf("the server does not serve the fixture's DER program %q", p.Description)
 		}
-		for _, dc := range p.Controls {
-			if !seen["control "+p.Description+"/"+dc.Description] {
-				return fmt.Errorf("the server does not serve the fixture's control %q of %q", dc.Description, p.Description)
+		for _, fc := range p.Controls {
+			if !slices.ContainsFunc(controls, func(dc sep2.DERControl) bool { return controlMatches(fc, dc) }) {
+				return fmt.Errorf("the server does not serve the fixture's control %q of %q", fc.Description, p.Description)
 			}
 		}
 	}
 	return nil
+}
+
+// controlMatches reports whether a served DERControl has the fixture
+// control's duration and DERControlBase values.
+func controlMatches(fc Control, dc sep2.DERControl) bool {
+	if dc.Interval == nil || dc.Interval.Duration != fc.Duration || dc.DERControlBase == nil {
+		return false
+	}
+	b := dc.DERControlBase
+	got := map[string]any{}
+	if b.OpModConnect != nil {
+		got["opModConnect"] = *b.OpModConnect
+	}
+	if b.OpModEnergize != nil {
+		got["opModEnergize"] = *b.OpModEnergize
+	}
+	if b.OpModMaxLimW != nil {
+		got["opModMaxLimW"] = float64(*b.OpModMaxLimW)
+	}
+	if b.OpModFixedW != nil {
+		got["opModFixedW"] = float64(*b.OpModFixedW)
+	}
+	want := map[string]any{}
+	for name, raw := range fc.Base {
+		var v any
+		if json.Unmarshal(raw, &v) != nil {
+			return false
+		}
+		want[name] = v
+	}
+	return reflect.DeepEqual(got, want)
 }
 
 func opReport(ctx context.Context, c *inverter.SEP2Client, f *Fixture, res *result) error {
@@ -337,7 +374,8 @@ func opReport(ctx context.Context, c *inverter.SEP2Client, f *Fixture, res *resu
 			Description:    r.Description,
 			LastUpdateTime: now,
 			ReadingType:    rt,
-			Reading:        &sep2.Reading{Value: &value},
+			// An instantaneous reading taken now (duration 0).
+			Reading: &sep2.Reading{Value: &value, TimePeriod: &sep2.DateTimeInterval{Start: now}},
 		})
 	}
 	loc, err := c.CreateMirrorUsagePoint(ctx, dc.MirrorUsagePointListLink.Href, inverter.DeviceLFDI(c.LFDI()), mup)

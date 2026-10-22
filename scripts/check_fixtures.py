@@ -35,15 +35,16 @@ def problems(path: pathlib.Path, fixture: dict) -> list[str]:
     duplicates = sorted({m for m in mrids if mrids.count(m) > 1})
     if duplicates:
         out.append(f"mRIDs used more than once: {', '.join(duplicates)}")
-    # Servers pick their own mRIDs and hrefs, so clients find the fixture's
-    # programs and controls by description.
+    # Servers pick their own mRIDs and hrefs, and may describe controls their
+    # own way, so clients find the fixture's programs by description and its
+    # controls by what they do: their DERControlBase and duration.
     programs = [p["description"] for p in fixture["derPrograms"]]
     if len(set(programs)) != len(programs):
         out.append("DER program descriptions are not unique")
     for program in fixture["derPrograms"]:
-        controls = [c["description"] for c in program["controls"]]
+        controls = [json.dumps([c["base"], c["duration"]], sort_keys=True) for c in program["controls"]]
         if len(set(controls)) != len(controls):
-            out.append(f'control descriptions of DER program "{program["description"]}" are not unique')
+            out.append(f'DER program "{program["description"]}" has two controls with the same base and duration')
     return out
 
 

@@ -32,8 +32,8 @@ otfabric/go-ieee20305, is in that repository's IMPLEMENTATION_PLAN.md.
       TLS capabilities
 - [x] `py20305` adapter: Python client (v0.16.0), GCM and CCM_8, with a
       hashed dependency lock
-- [ ] `envoy` adapter: Python server (v2.5.0) with PostgreSQL and a TLS
-      proxy that forwards the client certificate, CSIP-AUS
+- [x] `envoy` adapter: Python server (v2.5.0) with PostgreSQL and HAProxy,
+      which forwards the client certificate's fingerprint
 - [ ] `epri` adapter: C client, CCM_8 only
 - [ ] Control socket and `call`, `client run`, subscriptions, and the events
 - [ ] Contract 1.0, once the adapters close the gaps

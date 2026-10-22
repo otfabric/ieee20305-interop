@@ -44,9 +44,9 @@ RUN set -eu; \
     /opt/venv/bin/python -c "import py20305.client.csip_client"
 
 # Licences of py20305 and of everything installed beside it.
-COPY adapters/py20305/collect_licenses.py /src/collect_licenses.py
+COPY adapters/common/collect_licenses.py /src/collect_licenses.py
 RUN set -eu; \
-    /opt/venv/bin/python collect_licenses.py /out/licenses; \
+    /opt/venv/bin/python collect_licenses.py /out/licenses py20305; \
     mkdir -p /out/licenses/github.com/DERSecurity/py20305; \
     cp py20305/LICENSE py20305/NOTICE /out/licenses/github.com/DERSecurity/py20305/
 

@@ -2,8 +2,8 @@
 
 Version: **0.2 (draft)**. `contract_version` in [versions.yaml](../versions.yaml).
 
-> Implemented by the `gridappsd` (server and client) and `py20305` (client)
-> adapters, without `call`, `client run` and `subscribe`. It stays a draft (0.x) until the adapters
+> Implemented by the `gridappsd` (server and client), `envoy` (server) and
+> `py20305` (client) adapters, without `call`, `client run` and `subscribe`. It stays a draft (0.x) until the adapters
 > together implement every part of it;
 > [Gaps before 1.0](#gaps-before-10) lists what is missing. Until 1.0 it may
 > change without a major version bump.
@@ -66,9 +66,11 @@ shape:
    mirrors. The fixture seeds that state when the server starts; the server
    then answers every request itself. A fixture never prescribes an answer
    to a request.
-4. **The server picks its paths.** Links, `href`s and identifiers below
-   `/dcap` belong to the server. Fixtures identify resources by mRID and
-   description, and clients find them by following links.
+4. **The server picks its paths and names.** Links, `href`s, mRIDs and
+   even control descriptions below `/dcap` belong to the server. Clients
+   find resources by following links, a fixture's DER programs by their
+   description, and its controls by what they do (DERControlBase and
+   duration).
 5. **XML on the wire, JSON in the contract.** The protocol uses
    `application/sep+xml`. The contract's documents (events, results,
    fixtures, capabilities) are JSON, so that a consumer in any language can
@@ -116,7 +118,9 @@ mutual TLS, for the edition `--version`. Before it is ready, the server:
 
 1. provisions every device whose certificate is in `--tls-dir/devices`, by
    the LFDI and SFDI of that certificate, with the fixture's registration
-   PIN; a device that is not provisioned is not registered;
+   PIN. A device that is not provisioned does not get that registration:
+   the server refuses it, or lets it register itself with a PIN of its own
+   (IEEE 2030.5 in-band registration);
 2. seeds, for each provisioned device, the fixture's DER programs with their
    default control and controls (see [docs/FIXTURES.md](FIXTURES.md)).
 
@@ -137,7 +141,7 @@ A one-shot client: connect to `--url`, perform one operation as the device of
 |-----------|----------------------|-----------|
 | `discover` | GET `/dcap` | the server returned a DeviceCapability |
 | `register` | find its own EndDevice in the EndDeviceList (by LFDI), POST one if there is none, then GET its Registration | the Registration's PIN is the fixture's |
-| `poll-controls` | follow the device's FunctionSetAssignments to its DER programs, and GET their default controls and controls | every DER program of the fixture, and each of its controls, is served (matched by description) |
+| `poll-controls` | follow the device's FunctionSetAssignments to its DER programs, and GET their default controls and controls | every DER program of the fixture is served (matched by description), with each of its controls (matched by DERControlBase values and duration) |
 | `report` | POST the fixture's MirrorUsagePoint with its MirrorMeterReadings | the server created the mirror (201 with a `Location`) |
 | `subscribe` | POST a Subscription to the device's DER program list | the server created the subscription |
 
@@ -309,8 +313,6 @@ this repository. An unknown name is exit 1. See [docs/FIXTURES.md](FIXTURES.md).
       `request-received`) are reserved only.
 - [ ] CSIP-AUS behaviour (connection points, site limits) is not
       exercised by any fixture.
-- [ ] One server upstream so far; the server side of the contract is not
-      yet shaped by a second implementation.
 
 ## Changes
 
@@ -326,6 +328,9 @@ From implementing the `gridappsd` adapter:
 - Servers are seeded by the fixture (devices, PIN, DER programs, controls)
   instead of answering each request from it. The `answers` and `samples`
   of fixtures are removed.
+- Controls are scheduled (`start`) and matched by what they do, not by
+  description; an unprovisioned device may register itself with a PIN of
+  the server's choosing (from implementing the `envoy` adapter).
 - Operations defined by what the client does and when it is `ok`.
 - New server event `device-provisioned`; `ready` carries `version`.
 - Capabilities declare the TLS versions and cipher suites (`tls`); pairings

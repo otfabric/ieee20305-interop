@@ -8,12 +8,14 @@
 #
 # Each server provisions the device of tls/client (tls/server/devices). A
 # client connects to https://127.0.0.1:<port>/dcap with tls/client/client.crt
-# and client.key, and verifies the server with tls/client/ca.crt. The
-# GridAPPS-D server accepts only the TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 cipher
-# suite.
+# and client.key, and verifies the server with tls/client/ca.crt:
+#
+#   gridappsd-server  8444  2018 or 2023, TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 only
+#   envoy-server      8445  2018, CCM_8 and the ECDSA AES-GCM suites
 #
 # IEEE20305_INTEROP_VERSION selects the image tag (default: dev, the local
-# build); IEEE20305_EDITION the IEEE 2030.5 version (default 2018).
+# build); IEEE20305_EDITION the IEEE 2030.5 version of the GridAPPS-D
+# server (default 2018).
 
 x-server: &server
   volumes:
@@ -23,7 +25,7 @@ x-server: &server
     interval: 2s
     timeout: 2s
     retries: 15
-    start_period: 20s
+    start_period: 40s
   stop_grace_period: 15s
 
 name: ieee20305-interop
@@ -34,3 +36,10 @@ services:
     command: ["server", "--version", "${IEEE20305_EDITION:-2018}", "--tls-dir", "/tls/server"]
     ports:
       - "127.0.0.1:8444:443"
+
+  envoy-server:
+    <<: *server
+    image: ghcr.io/otfabric/ieee20305-interop-envoy:${IEEE20305_INTEROP_VERSION:-dev}
+    command: ["server", "--version", "2018", "--tls-dir", "/tls/server"]
+    ports:
+      - "127.0.0.1:8445:443"

@@ -29,8 +29,8 @@ validates each fixture against
 - the name is the directory name;
 - the PIN has a valid check digit;
 - every mRID is used once;
-- DER program descriptions are unique, and so are the control descriptions
-  within a program.
+- DER program descriptions are unique, and no program has two controls with
+  the same DERControlBase and duration.
 
 The adapters check a fixture when they load it, and exit 4 on a violation.
 A fixture the adapter cannot seed or send exits 5.
@@ -38,10 +38,15 @@ A fixture the adapter cannot seed or send exits 5.
 ## The baseline fixture
 
 [fixtures/baseline/fixture.json](../fixtures/baseline/fixture.json): one
-device, one DER program (primacy 1) with a default control (connect and
-energize) and two controls (connect and energize for an hour; active power
-at most 50 percent for half an hour), and one MirrorUsagePoint with a
-real-power reading.
+device, one DER program (primacy 1) with two scheduled controls (connect and
+energize for an hour from the start; then disconnect for half an hour), and
+one MirrorUsagePoint with a real-power reading.
+
+The baseline holds only what every server adapter can be seeded with:
+`opModConnect` and `opModEnergize` are base IEEE 2030.5 and CSIP-AUS alike,
+and it has no `defaultControl`, because Envoy's defaults are CSIP-AUS limits
+only. A fixture that needs more is for the adapters that declare it; the
+others exit 5.
 
 ## Fields
 
@@ -61,7 +66,7 @@ real-power reading.
 | `description` | string | At most 32 characters (String32); how clients find the program |
 | `primacy` | integer | 0–255; lower is higher priority |
 | `defaultControl` | object | Optional DefaultDERControl: `mRID`, `description`, `base` |
-| `controls` | array | DERControls: `mRID`, `description`, `base`, `duration` (seconds). A server starts each control when it starts |
+| `controls` | array | DERControls: `mRID`, `description`, `base`, `duration` (seconds) and `start` (seconds after the server starts; default 0) |
 
 `base` is a DERControlBase with at least one of:
 
@@ -72,8 +77,10 @@ real-power reading.
 | `opModMaxLimW` | integer | PerCent: hundredths of a percent of the maximum active power, 0–10000 |
 | `opModFixedW` | integer | SignedPerCent, -10000–10000 |
 
-A server is free to give the programs and controls its own mRIDs and hrefs;
-the description is what a client matches on.
+A server is free to give the programs and controls its own mRIDs, hrefs and,
+for controls, descriptions (Envoy describes a control by its start time). A
+client finds a program by its description and a control by its `base` and
+`duration`.
 
 ### `report`
 

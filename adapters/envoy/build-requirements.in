@@ -1,0 +1,6 @@
+# What the image build needs to install Envoy: uv, to export Envoy's own
+# uv.lock (with its hashes), and the build backend of its package.
+# Locked, with hashes, by: make lock-envoy
+uv==0.13.5
+setuptools>=68.0
+wheel

@@ -44,6 +44,7 @@ type Control struct {
 	Description string                     `json:"description"`
 	Base        map[string]json.RawMessage `json:"base"`
 	Duration    uint32                     `json:"duration"`
+	Start       uint32                     `json:"start"` // seconds after the server starts
 }
 
 // Report is the metering a client reports.
