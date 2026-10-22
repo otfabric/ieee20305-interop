@@ -23,7 +23,7 @@ Makefile's `ADAPTERS`, or the release fails.
 
 ## v0.1.0
 
-**Date:** unreleased  
+**Date:** 2026-10-22  
 **Previous release:** none
 
 ### Summary
