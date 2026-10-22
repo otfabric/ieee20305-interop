@@ -1,0 +1,174 @@
+name: Self-test
+
+# The images' build and self-test, called by the CI and Release workflows.
+# Everything runs natively on amd64 and arm64 runners (no emulation):
+#
+#   plan      the adapters (the Makefile's ADAPTERS)
+#   build     one job per adapter and architecture; the image is an artifact
+#             (image-<adapter>-<arch>), which the Release workflow pushes
+#   smoke     one job per adapter and architecture (scripts/smoke.sh), with
+#             gridappsd as the peer of an adapter with one role
+#   interop   one job per architecture (scripts/interop.sh): every client
+#             against every server
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Image tag (VERSION of the Makefile)
+        type: string
+        required: true
+    outputs:
+      adapters:
+        description: JSON list of the adapters built and tested
+        value: ${{ jobs.plan.outputs.adapters }}
+
+permissions:
+  contents: read
+
+env:
+  # Nothing is pulled from Docker Hub: anonymous pulls are rate limited per
+  # runner address and its token service times out under load. Base images
+  # (pinned by digest) and build tooling come from Google's mirror of it, and
+  # every registry operation is retried on transient failures (scripts/retry.sh).
+  BASE_REGISTRY: mirror.gcr.io/library
+  TOOLS_REGISTRY: mirror.gcr.io
+  VERSION: ${{ inputs.version }}
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    outputs:
+      adapters: ${{ steps.plan.outputs.adapters }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: plan
+        run: |
+          adapters=$(sed -nE 's/^ADAPTERS \?= //p' Makefile | jq -Rc 'split(" ") | map(select(. != ""))')
+          [[ "${adapters}" != "[]" ]] || { echo "::error::no ADAPTERS in the Makefile"; exit 1; }
+          echo "adapters=${adapters}" | tee -a "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.adapter }} (${{ matrix.arch }})
+    needs: plan
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        adapter: ${{ fromJSON(needs.plan.outputs.adapters) }}
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build
+        run: make image-${{ matrix.adapter }}
+      - name: The image is linux/${{ matrix.arch }}
+        run: |
+          got=$(docker image inspect --format '{{.Architecture}}' "ghcr.io/otfabric/ieee20305-interop-${{ matrix.adapter }}:${VERSION}")
+          [[ "${got}" == "${{ matrix.arch }}" ]] || { echo "::error::the image is ${got}"; exit 1; }
+      - name: Capabilities
+        run: |
+          {
+            echo "### ${{ matrix.adapter }} (${{ matrix.arch }})"
+            echo '```json'
+            docker run --rm "ghcr.io/otfabric/ieee20305-interop-${{ matrix.adapter }}:${VERSION}" print-capabilities \
+              | jq -c '{tls: .tls.cipherSuites, versions: (.versions | map_values({server: .server.operations, client: .client.operations}))}'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Save the image
+        run: docker save "ghcr.io/otfabric/ieee20305-interop-${{ matrix.adapter }}:${VERSION}" | gzip -1 > image.tar.gz
+      - uses: actions/upload-artifact@v7
+        with:
+          name: image-${{ matrix.adapter }}-${{ matrix.arch }}
+          path: image.tar.gz
+          compression-level: 0
+          retention-days: 3
+
+  smoke:
+    name: Smoke ${{ matrix.adapter }} (${{ matrix.arch }})
+    needs: [plan, build]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        adapter: ${{ fromJSON(needs.plan.outputs.adapters) }}
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      # The adapter, and gridappsd: the peer of an adapter with one role
+      # (SMOKE_PEER of scripts/smoke.sh).
+      - uses: actions/download-artifact@v8
+        with:
+          name: image-${{ matrix.adapter }}-${{ matrix.arch }}
+          path: images/${{ matrix.adapter }}
+      - uses: actions/download-artifact@v8
+        if: matrix.adapter != 'gridappsd'
+        with:
+          name: image-gridappsd-${{ matrix.arch }}
+          path: images/gridappsd
+      - name: Load the images
+        run: for f in images/*/image.tar.gz; do docker load --quiet --input "${f}"; done
+      - name: Smoke test
+        run: REPORT_DIR=reports scripts/smoke.sh "${{ matrix.adapter }}"
+      - name: Collect container logs on failure
+        if: failure()
+        run: |
+          mkdir -p logs
+          for c in $(docker ps -aq --filter "label=ieee20305-interop.run"); do docker logs "$c" > "logs/${c}.log" 2>&1 || true; done
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: smoke-${{ matrix.adapter }}-${{ matrix.arch }}
+          path: |
+            reports/
+            logs/
+          if-no-files-found: ignore
+
+  interop:
+    name: Interop (${{ matrix.arch }})
+    needs: [plan, build]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: image-*-${{ matrix.arch }}
+          path: images
+      - name: Load the images
+        run: for f in images/*/image.tar.gz; do docker load --quiet --input "${f}"; done
+      - name: Cross-stack self-test
+        run: REPORT_DIR=reports make interop
+      - name: Collect container logs on failure
+        if: failure()
+        run: |
+          mkdir -p logs
+          for c in $(docker ps -aq --filter "label=ieee20305-interop.run"); do docker logs "$c" > "logs/${c}.log" 2>&1 || true; done
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: interop-${{ matrix.arch }}
+          path: |
+            reports/
+            logs/
+          if-no-files-found: ignore

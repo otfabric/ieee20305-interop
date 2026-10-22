@@ -1,0 +1,134 @@
+name: Release
+run-name: "Release ${{ github.ref_name }}"
+
+# Releases the tag vX.Y.Z: checks the repository, builds and self-tests every
+# image natively on amd64 and arm64, pushes exactly the tested images, joins
+# them into multi-arch indexes and creates the GitHub release, whose notes
+# are the version's section of RELEASE.md. See RELEASE.md.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write   # create the GitHub release
+  packages: write   # push to GHCR
+
+env:
+  REGISTRY: ghcr.io/otfabric
+  # Nothing is pulled from Docker Hub: anonymous pulls are rate limited per
+  # runner address and its token service times out under load. Base images
+  # (pinned by digest) and build tooling come from Google's mirror of it, and
+  # every registry operation is retried on transient failures (scripts/retry.sh).
+  BASE_REGISTRY: mirror.gcr.io/library
+  TOOLS_REGISTRY: mirror.gcr.io
+  VERSION: ${{ github.ref_name }}
+
+jobs:
+  check:
+    name: Release check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install jsonschema
+      - name: Validate
+        run: |
+          make validate
+          scripts/release-check.sh "${VERSION}"
+      - name: Every built adapter is in the Makefile
+        run: |
+          adapters=" $(sed -nE 's/^ADAPTERS \?= //p' Makefile) "
+          for dockerfile in adapters/*/Dockerfile; do
+            name=$(basename "$(dirname "${dockerfile}")")
+            [[ "${adapters}" == *" ${name} "* ]] || { echo "::error::${name} has a Dockerfile but is not in ADAPTERS"; exit 1; }
+          done
+
+  # The images of every adapter, built natively on amd64 and arm64 runners and
+  # self-tested there (.github/workflows/selftest.yml).
+  selftest:
+    name: Self-test
+    needs: check
+    uses: ./.github/workflows/selftest.yml
+    with:
+      version: ${{ github.ref_name }}
+
+  # Pushes exactly the images the self-test tested (its image artifacts) as
+  # <image>:<version>-<arch>, once every self-test job has passed.
+  push:
+    name: Push ${{ matrix.adapter }} (${{ matrix.arch }})
+    needs: selftest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: true
+      matrix:
+        adapter: ${{ fromJSON(needs.selftest.outputs.adapters) }}
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: image-${{ matrix.adapter }}-${{ matrix.arch }}
+      - name: Load the tested image
+        run: docker load --quiet --input image.tar.gz
+
+      - name: Login to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "${GHCR_TOKEN}" > "${RUNNER_TEMP}/ghcr-token"
+          # shellcheck disable=SC2016  # $0 and $1 are for the inner shell
+          scripts/retry.sh sh -c 'docker login ghcr.io --username "$0" --password-stdin < "$1"' \
+            "${{ github.actor }}" "${RUNNER_TEMP}/ghcr-token"
+          rm -f "${RUNNER_TEMP}/ghcr-token"
+
+      - name: Push the tested image as ${{ github.ref_name }}-${{ matrix.arch }}
+        run: make publish-arch ARCH=${{ matrix.arch }} ADAPTERS=${{ matrix.adapter }}
+
+  # Joins the per-architecture images into the multi-arch tag and publishes
+  # the release. Nothing is built here.
+  release:
+    name: Multi-arch manifest and release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs: push
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Login to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "${GHCR_TOKEN}" > "${RUNNER_TEMP}/ghcr-token"
+          # shellcheck disable=SC2016  # $0 and $1 are for the inner shell
+          scripts/retry.sh sh -c 'docker login ghcr.io --username "$0" --password-stdin < "$1"' \
+            "${{ github.actor }}" "${RUNNER_TEMP}/ghcr-token"
+          rm -f "${RUNNER_TEMP}/ghcr-token"
+
+      - name: Create ${{ github.ref_name }} from the amd64 and arm64 images
+        run: make publish-manifest
+
+      - name: Digests of the multi-arch images
+        run: |
+          make -s digests | tee digests.txt
+          while read -r adapter digest; do
+            [[ "${digest}" == sha256:* ]] || { echo "::error::no digest for ${adapter}"; exit 1; }
+          done < digests.txt
+          [[ -s digests.txt ]] || { echo "::error::no image digests"; exit 1; }
+
+      - name: Write manifest.json and the release notes
+        run: |
+          scripts/release-manifest.py "${VERSION}" "${GITHUB_SHA}" digests.txt manifest.json release-body.md
+          cat manifest.json release-body.md
+          sha256sum manifest.json > checksums.txt
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          body_path: release-body.md
+          files: |
+            manifest.json
+            checksums.txt

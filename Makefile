@@ -41,7 +41,7 @@ export REGISTRY VERSION
 # image-%, smoke-%, run-% and candidate-% are pattern rules, which make
 # ignores for .PHONY targets: they depend on FORCE instead.
 .PHONY: help all ci validate versions schemas fixtures lint images smoke interop \
-        capabilities pki lock-py20305 lock-envoy buildx-setup buildx publish publish-arch publish-manifest digests documents run-% clean FORCE
+        capabilities pki lock-py20305 lock-envoy release-prep release-check buildx-setup buildx publish publish-arch publish-manifest digests documents run-% clean FORCE
 FORCE:
 
 help: ## Show this help
@@ -139,13 +139,19 @@ lock-envoy: ## Regenerate adapters/envoy/build-requirements.txt (hashed); Envoy'
 
 CANDIDATE_VERSION ?=
 CANDIDATE_SHA     ?=
+# Other pins to move, as NAME=VALUE build arguments, such as the second
+# upstream of an image: CANDIDATE_ARGS="CLIENT_VERSION=v0.2.0 CLIENT_SHA=<sha>".
+# scripts/latest-upstream.py prints them for every stack.
+CANDIDATE_ARGS    ?=
 
-candidate-%: FORCE ## Build one adapter on CANDIDATE_VERSION and self-test it
-	@test -n "$(CANDIDATE_VERSION)" || { echo "Error: CANDIDATE_VERSION=<upstream version> is required"; exit 1; }
-	@echo "Building $* candidate on $(CANDIDATE_VERSION) $(CANDIDATE_SHA)..."
+candidate-%: FORCE ## Build one adapter on CANDIDATE_VERSION (or CANDIDATE_ARGS) and self-test it
+	@test -n "$(CANDIDATE_VERSION)$(CANDIDATE_ARGS)" || { echo "Error: CANDIDATE_VERSION=<upstream version> or CANDIDATE_ARGS=<NAME=VALUE ...> is required"; exit 1; }
+	@echo "Building $* candidate on $(CANDIDATE_VERSION) $(CANDIDATE_SHA) $(CANDIDATE_ARGS)..."
 	@$(RETRY) docker build \
 		--build-arg BASE_REGISTRY=$(BASE_REGISTRY) --build-arg ADAPTER_VERSION=candidate \
-		--build-arg UPSTREAM_VERSION=$(CANDIDATE_VERSION) $(if $(CANDIDATE_SHA),--build-arg UPSTREAM_SHA=$(CANDIDATE_SHA)) \
+		$(if $(CANDIDATE_VERSION),--build-arg UPSTREAM_VERSION=$(CANDIDATE_VERSION)) \
+		$(if $(CANDIDATE_SHA),--build-arg UPSTREAM_SHA=$(CANDIDATE_SHA)) \
+		$(foreach a,$(CANDIDATE_ARGS),--build-arg $(a)) \
 		--tag $(call image,$*):candidate \
 		--file adapters/$*/Dockerfile .
 	@for a in $(filter-out $*,$(ADAPTERS)); do docker tag $(call image,$$a):$(VERSION) $(call image,$$a):candidate || exit 1; done
@@ -231,6 +237,14 @@ digests: ## Print "<adapter> <digest>" of the published multi-arch images of VER
 		d=$$($(RETRY) docker buildx imagetools inspect $(call image,$$a):$(VERSION) --format '{{.Manifest.Digest}}') || exit 1; \
 		echo "$$a $$d"; \
 	done
+
+# ── Release ───────────────────────────────────────────────────────────────────
+
+release-prep: ## Turn the "## Unreleased" notes into VERSION and set interop_version (VERSION=vX.Y.Z)
+	@scripts/release-prep.py "$(VERSION)"
+
+release-check: ## Check that the tree can be released as VERSION, as the Release workflow does (VERSION=vX.Y.Z)
+	@scripts/release-check.sh "$(VERSION)"
 
 # ── Clean ─────────────────────────────────────────────────────────────────────
 

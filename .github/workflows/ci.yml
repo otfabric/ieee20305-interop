@@ -49,23 +49,11 @@ jobs:
             echo "::error::consumer-specific reference found"; exit 1
           fi
 
+  # The images built and self-tested natively on amd64 and arm64, with the
+  # jobs the Release workflow uses (.github/workflows/selftest.yml).
   selftest:
     name: Images and self-tests
     needs: validate
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v7
-      - name: Build the adapter images
-        run: make images
-      - name: Container-contract smoke tests
-        run: REPORT_DIR=reports make smoke
-      - name: Cross-stack tests
-        run: REPORT_DIR=reports make interop
-      - name: Keep the reports
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: selftest-reports
-          path: reports/
-          if-no-files-found: ignore
+    uses: ./.github/workflows/selftest.yml
+    with:
+      version: dev

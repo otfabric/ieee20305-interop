@@ -1,0 +1,192 @@
+name: Upstream candidates
+run-name: "Candidate upstream probe by @${{ github.actor }}"
+
+# Resolves the latest upstream release of every stack the adapters pin and
+# publishes a pin-vs-latest decision table in the workflow Job Summary. When
+# a pin is behind, a candidate image is built at the latest release and
+# self-tested against the pinned other stacks, and an issue is opened (or the
+# open one updated) with the table; it is closed once every pin is the latest
+# release again. Release pins (Dockerfiles, lock files, versions.yaml) are
+# never modified.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Nothing is pulled from Docker Hub: anonymous pulls are rate limited per
+  # runner address. Base images (pinned by digest) and build tooling come
+  # from Google's mirror of it (see ci.yml).
+  BASE_REGISTRY: mirror.gcr.io/library
+  TOOLS_REGISTRY: mirror.gcr.io
+
+jobs:
+  candidate:
+    name: ${{ matrix.stack }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every upstream an image pins: gridappsd-client is the second
+        # upstream of the gridappsd image.
+        stack: [gridappsd, gridappsd-client, py20305, envoy, epri]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Resolve the pin against upstream
+        id: resolve
+        run: scripts/latest-upstream.py "${{ matrix.stack }}" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Build and self-test at the latest release
+        id: test
+        if: steps.resolve.outputs.update == 'yes'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          make images
+          make "candidate-${{ steps.resolve.outputs.adapter }}" \
+            CANDIDATE_ARGS="${{ steps.resolve.outputs.candidate_args }}" 2>&1 | tee selftest.log
+          echo "result=$(grep -E '^\[interop\] [0-9]+ passed' selftest.log | tail -1 | sed 's/^\[interop\] //')" >> "$GITHUB_OUTPUT"
+
+      - name: Known bugs of the latest release
+        id: known
+        run: |
+          known=$(awk -F'\t' -v a="${{ steps.resolve.outputs.adapter }}" -v v="${{ steps.resolve.outputs.latest }}" \
+            '!/^#/ { split($1, who, /[:@]/) } !/^#/ && who[1] == a && $2 == v { printf "%s%s", sep, $4; sep = "; " }' tests/known-bugs.tsv)
+          echo "known=${known}" >> "$GITHUB_OUTPUT"
+
+      - name: Write the table row
+        if: always()
+        env:
+          PIN: ${{ steps.resolve.outputs.pin }}
+          LATEST: ${{ steps.resolve.outputs.latest }}
+          SOURCE: ${{ steps.resolve.outputs.source }}
+          UPDATE: ${{ steps.resolve.outputs.update }}
+          OUTCOME: ${{ steps.test.outcome }}
+          RESULT: ${{ steps.test.outputs.result }}
+          KNOWN: ${{ steps.known.outputs.known }}
+        run: |
+          case "${OUTCOME}" in
+            ""|skipped) tested=$([[ "${UPDATE}" == "no" ]] && echo "same as pin" || echo "not run") ;;
+            *) tested="\`${OUTCOME}\`${RESULT:+<br>${RESULT}}" ;;
+          esac
+          # shellcheck disable=SC2016  # the backticks are Markdown, not command substitution
+          printf '| %s | %s | `%s` | `%s` | %s | **%s** | %s |\n' \
+            "${{ matrix.stack }}" "${SOURCE:-?}" "${PIN:-?}" "${LATEST:-?}" "${tested}" "${UPDATE:-?}" "${KNOWN}" \
+            > "row-${{ matrix.stack }}.md"
+
+      - name: Upload the row and the self-test log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: candidate-${{ matrix.stack }}
+          path: |
+            row-${{ matrix.stack }}.md
+            selftest.log
+          if-no-files-found: ignore
+
+  summary:
+    name: Decision table
+    runs-on: ubuntu-latest
+    needs: candidate
+    if: always()
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      ISSUE_TITLE: "Upstream releases: pins behind the latest"
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      STACK_COUNT: "5"
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: candidate-*
+          merge-multiple: true
+
+      - name: Write pin-vs-latest summary
+        id: table
+        run: |
+          {
+            echo "| Stack | Looked up in | Pin | Latest upstream | Candidate self-test | Update? | Known bugs of the latest |"
+            echo "|---|---|---|---|---|---|---|"
+            cat row-*.md 2>/dev/null || echo "| no rows: every candidate job failed before resolving | | | | | | |"
+          } > table.md
+          # A row exists for every stack whose job got as far as writing one;
+          # a row without a pin means the lookup itself failed.
+          rows=$(cat row-*.md 2>/dev/null | grep -c '^| ' || true)
+          resolved=$(cat row-*.md 2>/dev/null | grep -cE '\| \*\*(yes|no)\*\* \|' || true)
+          behind=$(cat row-*.md 2>/dev/null | grep -cF '| **yes** |' || true)
+          echo "behind=${behind}" >> "$GITHUB_OUTPUT"
+          echo "complete=$([[ "${rows}" -eq "${STACK_COUNT}" && "${resolved}" -eq "${STACK_COUNT}" ]] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Upstream candidate report"
+            echo
+            echo "Release pins were **not** modified. Use this table to decide whether to bump."
+            echo
+            cat table.md
+            echo
+            echo "### Pin locations"
+            echo
+            echo "An adapter pins its upstream as \`ARG UPSTREAM_VERSION\` and \`ARG UPSTREAM_SHA\` in"
+            echo "\`adapters/<adapter>/Dockerfile\` (the gridappsd image also \`CLIENT_VERSION\` and"
+            echo "\`CLIENT_SHA\`), mirrored in \`versions.yaml\`; \`make versions\` checks that they agree."
+            echo
+            echo "### How to read this"
+            echo
+            echo "- **Update? = yes** means the pin is not the latest stable upstream release."
+            echo "- **Candidate self-test** builds the adapter on that release and runs its smoke test and"
+            echo "  the cross-stack self-test against the pinned other stacks. \`success\`: the pin can move."
+            echo "  \`failure\`: read the uploaded log before bumping. Known-bug entries are tied to the"
+            echo "  pinned version, so a bug that persists in the candidate fails it."
+            echo "- Bump deliberately, after reading the upstream changelog: the Dockerfile, any lock file"
+            echo "  (\`make lock-py20305\`, \`make lock-envoy\`), \`versions.yaml\`,"
+            echo "  \`tests/known-bugs.tsv\`, and a note in \`RELEASE.md\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Find the open tracking issue
+        id: issue
+        run: |
+          number="$(gh issue list --state open --search "\"${ISSUE_TITLE}\" in:title" --json number,title \
+            --jq "[.[] | select(.title == env.ISSUE_TITLE)][0].number // empty")"
+          echo "number=${number}" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the tracking issue
+        if: steps.table.outputs.behind != '0'
+        env:
+          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
+        run: |
+          {
+            echo "The weekly probe found upstream releases newer than the pins of this repository."
+            echo
+            cat table.md
+            echo
+            echo "## To update"
+            echo
+            echo "Move the pins in \`adapters/<adapter>/Dockerfile\` and \`versions.yaml\` after the candidate"
+            echo "self-test passes; reproduce it with"
+            echo "\`make candidate-<adapter> CANDIDATE_ARGS=\"UPSTREAM_VERSION=<version> UPSTREAM_SHA=<commit>\"\`."
+            echo "Regenerate a lock file where the adapter has one. A release that fails the self-tests"
+            echo "stays a candidate: list its bug in \`tests/known-bugs.tsv\`. Note the change in \`RELEASE.md\`."
+            echo
+            echo "_Last checked by [this workflow run](${RUN_URL}). This issue is updated by the weekly"
+            echo "probe and closed automatically once every pin is the latest release._"
+          } > body.md
+          if [ -n "${ISSUE_NUMBER}" ]; then
+            gh issue edit "${ISSUE_NUMBER}" --body-file body.md
+            echo "Updated issue #${ISSUE_NUMBER}."
+          else
+            gh issue create --title "${ISSUE_TITLE}" --body-file body.md
+          fi
+
+      - name: Close the tracking issue when every pin is the latest
+        if: steps.table.outputs.behind == '0' && steps.table.outputs.complete == 'yes' && steps.issue.outputs.number != ''
+        env:
+          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
+        run: gh issue close "${ISSUE_NUMBER}" --comment "Every pin is the latest upstream release again."
