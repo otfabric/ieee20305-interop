@@ -32,7 +32,7 @@ BUILDER ?= ieee20305-interop
 
 # Adapters with an image, in priority order. The self-tests run over all of
 # them; override to work on one: make smoke ADAPTERS=epri
-ADAPTERS ?= gridappsd py20305 envoy
+ADAPTERS ?= gridappsd py20305 envoy epri
 
 image = $(REGISTRY)/ieee20305-interop-$(1)
 

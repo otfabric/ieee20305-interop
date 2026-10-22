@@ -17,25 +17,34 @@ protocol:
 implementations:
   epri:
     priority: P0
-    status: planned
+    status: implemented
     upstream: "EPRI IEEE 2030.5 Client"
     repository: "https://github.com/epri-dev/IEEE-2030.5-Client"
-    version: "planned"
+    version: "v0.2.11"
+    revision: "505ee47d9c3ed43ce63087198d09f77338da627d"
+    base_images:
+      DEBIAN_DIGEST: "sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad"   # debian:trixie-slim
+    debian_packages:
+      GCC_VERSION: "4:14.2.0-1"
+      OPENSSL_VERSION: "3.5.7-1~deb13u3"
+      PYTHON3_VERSION: "3.13.5-1"
+    patches: ["adapters/epri/patches/0001-sha256-padding.patch"]
     license: "BSD-3-Clause"
     language: "C"
     independent_engine: true
     roles: [client]
     versions_claimed: ["2018"]
-    candidate: "commit 505ee47d9c3ed43ce63087198d09f77338da627d (2018-07-27; tags v0.2.11, no releases)"
+    tls_cipher_suites: ["TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8"]
     note: >-
-      EPRI's C client (client_test). Unmaintained since 2018. Builds on
-      Debian trixie with OpenSSL 3 using its bash build (build.sh, not
-      CMake) after patching the OpenSSL 1.1.0 check in targets.sh. Offers
-      only TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 through OpenSSL; requires
-      critical subjectAltName and keyUsage in the server certificate;
-      derives the LFDI from the raw certificate file, so it needs DER; takes
-      IP literals only; no subscriptions (commented out); free-text output
-      and exit status 0 on every error.
+      EPRI's C client (client_test, v0.2.11, unmaintained since 2018; schema
+      sep.xsd 2.0.4), built with its own build script against OpenSSL 3
+      after relaxing its OpenSSL 1.1.0 check, with one patch: the SHA-256
+      padding of its LFDI, which crashed for one certificate in eight. Runs
+      at OpenSSL security level 0 so that OpenSSL 3 offers CCM_8. Its
+      output is free text and it exits 0 whatever happens; the adapter
+      reads the documents it prints. register, discover and poll-controls;
+      report posts a MirrorUsagePoint of its own, so it is not offered.
+      Known issues: tests/known-bugs.tsv.
 
   envoy:
     priority: P0

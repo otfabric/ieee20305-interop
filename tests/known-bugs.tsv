@@ -8,3 +8,5 @@
 #
 # A known-bug entry that does not reproduce in a run where its tests ran is a
 # stale entry, and fails the run (scripts/interop.sh).
+epri:client@gridappsd	v0.2.11	^2018\.poll-controls$	https://github.com/epri-dev/IEEE-2030.5-Client/blob/505ee47d9c3ed43ce63087198d09f77338da627d/retrieve.c#L140	get_seq() formats a list href and its query into char uri[64]; the DERControlList href of GridAPPS-D (about 100 characters) overflows it and client_test crashes
+epri:client@envoy	v0.2.11	^2018\.(register|poll-controls)$	https://github.com/epri-dev/IEEE-2030.5-Client/blob/505ee47d9c3ed43ce63087198d09f77338da627d/parse.c#L215	client_test parses strictly by its sep.xsd 2.0.4 and rejects the CSIP-AUS extension element csipaus:ConnectionPointLink that Envoy adds to EndDevice (parse error in message body)

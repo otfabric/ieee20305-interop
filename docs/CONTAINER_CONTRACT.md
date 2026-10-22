@@ -2,8 +2,9 @@
 
 Version: **0.2 (draft)**. `contract_version` in [versions.yaml](../versions.yaml).
 
-> Implemented by the `gridappsd` (server and client), `envoy` (server) and
-> `py20305` (client) adapters, without `call`, `client run` and `subscribe`. It stays a draft (0.x) until the adapters
+> Implemented by the `gridappsd` (server and client), `envoy` (server),
+> `py20305` (client) and `epri` (client) adapters, without `call`,
+> `client run` and `subscribe`. It stays a draft (0.x) until the adapters
 > together implement every part of it;
 > [Gaps before 1.0](#gaps-before-10) lists what is missing. Until 1.0 it may
 > change without a major version bump.

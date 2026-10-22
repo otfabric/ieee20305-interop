@@ -1,0 +1,19 @@
+Fix the SHA-256 padding for messages whose length modulo 64 is 56 to 63.
+
+sha256() computes the zero padding as 55 - (length % 64), which is negative
+for those lengths, and memset() with a negative length crashes. The LFDI is
+the SHA-256 of the device certificate, so client_test crashes at start-up
+for one certificate in eight, depending on the certificate the test
+generates. The padding is (55 - length % 64) mod 64.
+
+--- a/sha256.c
++++ b/sha256.c
+@@ -30,7 +30,7 @@ void sha256 (uint8_t *out, uint8_t *buffer, int length);
+ #define sha256_size(x) (((x)+9+63)&(~0x3f))
+ 
+ void sha256 (uint8_t *out, uint8_t *buffer, int length) {
+-  int pad = 55 - (length % 64);
++  int pad = (55 - (length % 64) + 64) % 64;
+   int i, n = (length+9+63) >> 6;
+   uint64_t l = length * 8;
+   uint32_t H[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,

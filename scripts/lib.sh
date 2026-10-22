@@ -286,3 +286,35 @@ finish() {
     log "${PASS} passed, ${FAIL} failed${extra}"
     [[ "${FAIL}" -eq 0 ]]
 }
+
+KNOWN_BUGS="${ROOT}/tests/known-bugs.tsv"
+
+# ---- known upstream bugs (tests/known-bugs.tsv) ----
+# Needs ${WORK}/caps-<adapter>.json, the capability document of each adapter.
+# known_bug <client> <server> <test id>: prints "<line number>\t<evidence>"
+# of the first entry of tests/known-bugs.tsv that explains a failure.
+# An entry is adapter[:role][@peer], upstream version, test id regex,
+# evidence URL, summary.
+known_bug() {
+    local client="$1" server="$2" id="$3" n=0 who version regex evidence adapter role peer
+    # The fifth column, the summary, is for people.
+    while IFS=$'\t' read -r who version regex evidence _; do
+        n=$((n + 1))
+        [[ -z "${who}" || "${who}" == \#* ]] && continue
+        adapter="${who%%[:@]*}"; role=""; peer=""
+        [[ "${who}" == *:* ]] && { role="${who#*:}"; role="${role%%@*}"; }
+        [[ "${who}" == *@* ]] && peer="${who#*@}"
+        local self other
+        case "${role}" in
+            client) self="${client}"; other="${server}" ;;
+            server) self="${server}"; other="${client}" ;;
+            *) if [[ "${adapter}" == "${client}" ]]; then self="${client}"; other="${server}"; else self="${server}"; other="${client}"; fi ;;
+        esac
+        [[ "${self}" == "${adapter}" ]] || continue
+        [[ -z "${peer}" || "${peer}" == "${other}" ]] || continue
+        [[ "$(jq -r '.upstream.version' "${WORK}/caps-${adapter}.json")" == "${version}" ]] || continue
+        [[ "${id}" =~ ${regex} ]] || continue
+        printf '%s\t%s\n' "${n}" "${evidence}"; return 0
+    done < "${KNOWN_BUGS}"
+    return 1
+}

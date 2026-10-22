@@ -1,0 +1,15 @@
+# OpenSSL configuration for the EPRI client. It sets the TLS cipher list
+# ECDHE-ECDSA-AES128-CCM8 and relies on the default security level, under
+# which OpenSSL 1.1.0, the version it was written for, offers CCM_8.
+# OpenSSL 3 admits CCM_8 at security level 0 only, so this sets that level;
+# the cipher list itself stays the client's own.
+openssl_conf = openssl_init
+
+[openssl_init]
+ssl_conf = ssl_sect
+
+[ssl_sect]
+system_default = system_default_sect
+
+[system_default_sect]
+CipherString = DEFAULT:@SECLEVEL=0

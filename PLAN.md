@@ -34,7 +34,8 @@ otfabric/go-ieee20305, is in that repository's IMPLEMENTATION_PLAN.md.
       hashed dependency lock
 - [x] `envoy` adapter: Python server (v2.5.0) with PostgreSQL and HAProxy,
       which forwards the client certificate's fingerprint
-- [ ] `epri` adapter: C client, CCM_8 only
+- [x] `epri` adapter: C client, CCM_8 only, with one patch (SHA-256
+      padding); two known upstream issues
 - [ ] Control socket and `call`, `client run`, subscriptions, and the events
 - [ ] Contract 1.0, once the adapters close the gaps
 

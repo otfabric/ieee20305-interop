@@ -54,6 +54,10 @@ if jq -e --arg a "${ADAPTER}" '
 then ok "print-capabilities"; else fail "print-capabilities is not a valid capability document: ${caps}"; fi
 if [[ $(wc -l <<<"${caps}") -eq 1 ]]; then ok "print-capabilities is one line"; else fail "print-capabilities printed more than one line"; fi
 
+# Capability documents for known_bug (scripts/lib.sh).
+printf '%s\n' "${caps}" > "${WORK}/caps-${ADAPTER}.json"
+docker run --rm "$(image_of "${PEER}")" print-capabilities > "${WORK}/caps-${PEER}.json" 2>/dev/null
+
 has_role() { jq -e --arg v "$2" --arg r "$1" '.versions[$v][$r].supported == true' <<<"${caps}" >/dev/null 2>&1; }
 DECLARED=$(jq -r '.versions | keys[]' <<<"${caps}" 2>/dev/null | tr '\n' ' ')
 log "declared IEEE 2030.5 versions: ${DECLARED}"
@@ -117,7 +121,11 @@ for v in ${DECLARED}; do
         for op in $(jq -r --arg v "${v}" '.versions[$v].client.operations[]' <<<"${caps}"); do
             doc=$(run_client "${ADAPTER}" "${TLS[@]}" -- "${op}" --version "${v}" --url "${url}" --tls-dir /tls/client); code=$?
             if [[ "${code}" == 0 ]] && jq -e --arg op "${op}" '.ok == true and .operation == $op and .schemaVersion == "1.0"' <<<"${doc}" >/dev/null 2>&1
-            then ok "client ${op} against ${server_image}"; else fail "client ${op} against ${server_image}: exit ${code}, ${doc:0:300}"; fi
+            then ok "client ${op} against ${server_image}"
+            elif bug=$(known_bug "${ADAPTER}" "${server_image}" "${v}.${op}") \
+                 && jq -e --arg op "${op}" '.ok == false and .operation == $op and .schemaVersion == "1.0"' <<<"${doc}" >/dev/null 2>&1
+            then ok "client ${op} against ${server_image}: known issue (tests/known-bugs.tsv line ${bug%%$'\t'*}), a valid result document"
+            else fail "client ${op} against ${server_image}: exit ${code}, ${doc:0:300}"; fi
         done
         doc=$(run_client "${ADAPTER}" "${TLS[@]}" -- discover --version "${v}" --url "https://no-such-host-${RUN_ID}:443/dcap" --tls-dir /tls/client --connect-timeout-ms 1500); code=$?
         if [[ "${code}" == 3 ]] && jq -e '.ok == false and .error.code == "connect-failed" and .response == null' <<<"${doc}" >/dev/null 2>&1
