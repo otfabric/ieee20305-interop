@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0",
   "name": "baseline",
-  "description": "One device, one DER program with two scheduled controls that every IEEE 2030.5 server can issue (connect and energize, then disconnect), and one metering report. Covers registration, discovery, control polling and metering.",
+  "description": "One device, one DER program with two scheduled controls that every IEEE 2030.5 server can issue (connect and energize, then disconnect), one metering report, and what a client sends for its DER, a log event and a flow reservation. Covers registration, discovery, control polling, metering, responses and subscriptions.",
   "device": {
     "serial": "ieee20305-interop-device-1",
     "pin": 111115,
@@ -60,5 +60,59 @@
         "value": 5000
       }
     ]
+  },
+  "der": {
+    "capability": {
+      "modesSupported": "00500088",
+      "rtgMaxW": {
+        "value": 5000,
+        "multiplier": 0
+      },
+      "type": 4,
+      "doeModesSupported": "0F"
+    },
+    "settings": {
+      "modesEnabled": "00500088",
+      "setMaxW": {
+        "value": 5000,
+        "multiplier": 0
+      },
+      "setGradW": 100,
+      "doeModesEnabled": "0F"
+    },
+    "status": {
+      "genConnectStatus": "07",
+      "operationalModeStatus": 2
+    },
+    "availability": {
+      "availabilityDuration": 3600,
+      "statWAvail": {
+        "value": 4500,
+        "multiplier": 0
+      }
+    }
+  },
+  "logEvent": {
+    "logEventCode": 1,
+    "logEventID": 1,
+    "logEventPEN": 40732,
+    "functionSet": 19,
+    "profileID": 2,
+    "details": "ieee20305-interop log event"
+  },
+  "flowReservation": {
+    "mRID": "A00000000000000000000000000000F1",
+    "description": "Charge reservation",
+    "energyRequested": {
+      "value": 10000,
+      "multiplier": 0
+    },
+    "powerRequested": {
+      "value": 5000,
+      "multiplier": 0
+    },
+    "start": 600,
+    "duration": 7200,
+    "durationRequested": 7200
   }
 }

@@ -63,8 +63,16 @@ DECLARED=$(jq -r '.versions | keys[]' <<<"${caps}" 2>/dev/null | tr '\n' ' ')
 log "declared IEEE 2030.5 versions: ${DECLARED}"
 
 # ---- the baked fixtures are the repository's ----
-if diff -q <(docker run --rm "${IMAGE}" print-fixture baseline 2>/dev/null) "${FIXTURE}" >/dev/null
-then ok "print-fixture baseline"; else fail "print-fixture baseline differs from fixtures/baseline/fixture.json"; fi
+for f in "${ROOT}"/fixtures/*/fixture.json; do
+    name=$(basename "$(dirname "${f}")")
+    if diff -q <(docker run --rm "${IMAGE}" print-fixture "${name}" 2>/dev/null) "${f}" >/dev/null
+    then ok "print-fixture ${name}"; else fail "print-fixture ${name} differs from fixtures/${name}/fixture.json"; fi
+done
+if diff -q <(docker run --rm "${IMAGE}" print-fixture 2>/dev/null) "${FIXTURE}" >/dev/null
+then ok "print-fixture defaults to baseline"; else fail "print-fixture without a name is not the baseline"; fi
+baked=$(cd "${ROOT}/fixtures" && ls | jq -Rsc 'split("\n") | map(select(. != ""))')
+if jq -e --argjson baked "${baked}" '[.versions[] | (.client, .server) | (.fixtures // [])[]] - $baked | length == 0' <<<"${caps}" >/dev/null 2>&1
+then ok "declared fixtures are baked"; else fail "the capabilities declare a fixture that is not baked"; fi
 expect_exit 1 "print-fixture of an unknown name" "${IMAGE}" print-fixture no-such-fixture
 expect_exit 0 "version" "${IMAGE}" version
 if [[ $(docker run --rm "${IMAGE}" version 2>/dev/null | wc -l) -eq 1 ]]; then ok "version is one line"; else fail "version is not one line"; fi
@@ -87,10 +95,16 @@ expect_exit 2 "client without --url" "${IMAGE}" client register --version 2018 -
 expect_exit 2 "client without --version" "${IMAGE}" client register --url https://nowhere:443/dcap --tls-dir /tls
 expect_exit 2 "client with a URL that is not https://" "${IMAGE}" client register --version 2018 --url http://nowhere/dcap --tls-dir /tls
 expect_exit 2 "client with an unknown operation" "${IMAGE}" client frobnicate --version 2018 --url https://nowhere:443/dcap --tls-dir /tls
+expect_exit 2 "call with an unknown flag" "${IMAGE}" call issue-control --frobnicate 1
+doc=$(docker run --rm "${IMAGE}" call issue-control --payload '{}' 2>/dev/null); code=$?
+if jq -e --argjson code "${code}" '.ok == false and .operation == "issue-control" and .schemaVersion == "1.0"
+        and ((.error.code == "not-connected" and $code == 1) or (.error.code == "unsupported" and $code == 5))' <<<"${doc}" >/dev/null 2>&1
+then ok "call without a running server: a result document"; else fail "call without a running server: ${doc:0:300}"; fi
 
 # ---- TLS material for everything below ----
 servers=("srv-${RUN_ID}" "peer-${RUN_ID}")
-make_pki "${WORK}/pki" "${SERIAL}" "${servers[@]}" localhost || { fail "cannot generate the TLS material"; finish; exit 1; }
+SUB="sub-${RUN_ID}"
+make_pki "${WORK}/pki" "${SERIAL}" "${servers[@]}" localhost -- "${SUB}" || { fail "cannot generate the TLS material"; finish; exit 1; }
 TLS=(-v "${WORK}/pki:/tls:ro")
 for v in ${DECLARED}; do
     has_role server "${v}" || continue
@@ -114,12 +128,39 @@ for v in ${DECLARED}; do
         then ok "ready event"; else fail "no valid ready event: ${ready}"; fi
         user=$(docker exec "${server_name}" id -u 2>/dev/null)
         if [[ "${user}" == 10001 ]]; then ok "runs as uid 10001"; else fail "runs as uid ${user}, want 10001"; fi
+        if jq -e --arg v "${v}" '.versions[$v].server.calls // [] | index("issue-control")' <<<"${caps}" >/dev/null 2>&1; then
+            program=$(jq -c '{program: .derPrograms[0].description, description: "Smoke test", base: {opModEnergize: true}, duration: 600, start: 0}' "${FIXTURE}")
+            doc=$(docker exec "${server_name}" ieee20305-interop call issue-control --payload "${program}" 2>/dev/null); code=$?
+            if [[ "${code}" == 0 ]] && jq -e '.ok == true and .operation == "issue-control" and .schemaVersion == "1.0"' <<<"${doc}" >/dev/null 2>&1
+            then ok "call issue-control"; else fail "call issue-control: exit ${code}, ${doc:0:300}"; fi
+            doc=$(docker exec "${server_name}" ieee20305-interop call issue-control --payload '{"program": "no such program", "base": {"opModEnergize": true}, "duration": 600}' 2>/dev/null); code=$?
+            if [[ "${code}" == 1 ]] && jq -e '.ok == false' <<<"${doc}" >/dev/null 2>&1
+            then ok "call issue-control of an unknown program fails"; else fail "call issue-control of an unknown program: exit ${code}, ${doc:0:300}"; fi
+        else
+            doc=$(docker exec "${server_name}" ieee20305-interop call issue-control --payload '{}' 2>/dev/null); code=$?
+            if [[ "${code}" == 5 ]] && jq -e '.error.code == "unsupported"' <<<"${doc}" >/dev/null 2>&1
+            then ok "call issue-control is unsupported, as declared"; else fail "call issue-control, which is not declared: exit ${code}, ${doc:0:300}"; fi
+        fi
     fi
 
     if has_role client "${v}"; then
         url="https://${server_name}:443/dcap"
+        server_caps="${WORK}/caps-${server_image}.json"
+        [[ -s "${server_caps}" ]] || printf '%s\n' "${caps}" > "${server_caps}"
         for op in $(jq -r --arg v "${v}" '.versions[$v].client.operations[]' <<<"${caps}"); do
-            doc=$(run_client "${ADAPTER}" "${TLS[@]}" -- "${op}" --version "${v}" --url "${url}" --tls-dir /tls/client); code=$?
+            # Only what the server serves: put-der needs a DER list, say.
+            if ! jq -e --arg v "${v}" --arg op "${op}" '.versions[$v].server.operations | index($op)' "${server_caps}" >/dev/null 2>&1; then
+                [[ -n "${VERBOSE:-}" ]] && log "skip client ${op}: ${server_image} does not serve it"
+                continue
+            fi
+            if [[ "${op}" == subscribe ]]; then
+                trigger=no
+                jq -e --arg v "${v}" '.versions[$v].server.calls // [] | index("issue-control")' "${server_caps}" >/dev/null 2>&1 && trigger=yes
+                doc=$(run_subscribe "${ADAPTER}" "${SUB}" "${server_name}" "${trigger}" "${TLS[@]}" -- --version "${v}" --url "${url}" \
+                    --tls-dir /tls/client --timeout-ms 30000); code=$?
+            else
+                doc=$(run_client "${ADAPTER}" "${TLS[@]}" -- "${op}" --version "${v}" --url "${url}" --tls-dir /tls/client); code=$?
+            fi
             if [[ "${code}" == 0 ]] && jq -e --arg op "${op}" '.ok == true and .operation == $op and .schemaVersion == "1.0"' <<<"${doc}" >/dev/null 2>&1
             then ok "client ${op} against ${server_image}"
             elif bug=$(known_bug "${ADAPTER}" "${server_image}" "${v}.${op}") \

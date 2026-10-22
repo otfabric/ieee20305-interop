@@ -1,0 +1,232 @@
+{
+  "schemaVersion": "1.0",
+  "name": "csip-aus",
+  "description": "CSIP-AUS: two DER programs whose default controls and controls are dynamic operating envelopes (export, import, generation and load limits), and a time-of-use tariff for import and export.",
+  "device": {
+    "serial": "ieee20305-interop-device-1",
+    "pin": 111115,
+    "deviceCategory": "00020000"
+  },
+  "derPrograms": [
+    {
+      "mRID": "D0000000000000000000000000000001",
+      "description": "DNSP envelope",
+      "primacy": 1,
+      "defaultControl": {
+        "mRID": "D0000000000000000000000000000002",
+        "description": "DNSP default envelope",
+        "base": {
+          "opModExpLimW": {
+            "value": 1500,
+            "multiplier": 0
+          },
+          "opModImpLimW": {
+            "value": 10000,
+            "multiplier": 0
+          },
+          "opModGenLimW": {
+            "value": 5000,
+            "multiplier": 0
+          },
+          "opModLoadLimW": {
+            "value": 10000,
+            "multiplier": 0
+          }
+        }
+      },
+      "controls": [
+        {
+          "mRID": "D0000000000000000000000000000003",
+          "description": "Export 5 kW",
+          "base": {
+            "opModExpLimW": {
+              "value": 5000,
+              "multiplier": 0
+            },
+            "opModImpLimW": {
+              "value": 10000,
+              "multiplier": 0
+            }
+          },
+          "duration": 3600,
+          "start": 0
+        },
+        {
+          "mRID": "D0000000000000000000000000000004",
+          "description": "Zero export",
+          "base": {
+            "opModExpLimW": {
+              "value": 0,
+              "multiplier": 0
+            },
+            "opModGenLimW": {
+              "value": 3000,
+              "multiplier": 0
+            }
+          },
+          "duration": 1800,
+          "start": 3600
+        }
+      ]
+    },
+    {
+      "mRID": "D0000000000000000000000000000011",
+      "description": "Aggregator envelope",
+      "primacy": 2,
+      "defaultControl": {
+        "mRID": "D0000000000000000000000000000012",
+        "description": "Aggregator default envelope",
+        "base": {
+          "opModLoadLimW": {
+            "value": 8000,
+            "multiplier": 0
+          }
+        }
+      },
+      "controls": [
+        {
+          "mRID": "D0000000000000000000000000000013",
+          "description": "Connect",
+          "base": {
+            "opModConnect": true,
+            "opModLoadLimW": {
+              "value": 7000,
+              "multiplier": 0
+            }
+          },
+          "duration": 1800,
+          "start": 0
+        }
+      ]
+    }
+  ],
+  "report": {
+    "mirrorUsagePoint": {
+      "mRID": "D0000000000000000000000000000005",
+      "description": "Inverter output",
+      "roleFlags": "0049",
+      "serviceCategoryKind": 0,
+      "status": 1
+    },
+    "meterReadings": [
+      {
+        "mRID": "D0000000000000000000000000000006",
+        "description": "Real power",
+        "readingType": {
+          "accumulationBehaviour": 12,
+          "commodity": 1,
+          "dataQualifier": 2,
+          "flowDirection": 1,
+          "kind": 37,
+          "phase": 0,
+          "powerOfTenMultiplier": 0,
+          "uom": 38
+        },
+        "value": 5000
+      }
+    ]
+  },
+  "der": {
+    "capability": {
+      "modesSupported": "00500088",
+      "rtgMaxW": {
+        "value": 5000,
+        "multiplier": 0
+      },
+      "type": 4,
+      "doeModesSupported": "0F"
+    },
+    "settings": {
+      "modesEnabled": "00500088",
+      "setMaxW": {
+        "value": 5000,
+        "multiplier": 0
+      },
+      "setGradW": 100,
+      "doeModesEnabled": "0F"
+    },
+    "status": {
+      "genConnectStatus": "07",
+      "operationalModeStatus": 2
+    },
+    "availability": {
+      "availabilityDuration": 3600,
+      "statWAvail": {
+        "value": 4500,
+        "multiplier": 0
+      }
+    }
+  },
+  "logEvent": {
+    "logEventCode": 1,
+    "logEventID": 1,
+    "logEventPEN": 40732,
+    "functionSet": 19,
+    "profileID": 2,
+    "details": "ieee20305-interop log event"
+  },
+  "flowReservation": {
+    "mRID": "D00000000000000000000000000000F1",
+    "description": "Charge reservation",
+    "energyRequested": {
+      "value": 10000,
+      "multiplier": 0
+    },
+    "powerRequested": {
+      "value": 5000,
+      "multiplier": 0
+    },
+    "start": 600,
+    "duration": 7200,
+    "durationRequested": 7200
+  },
+  "tariffs": [
+    {
+      "mRID": "D00000000000000000000000000000E1",
+      "description": "Time of use",
+      "currency": 36,
+      "pricePowerOfTenMultiplier": -4,
+      "primacy": 1,
+      "rateCode": "TOU1",
+      "rateComponents": [
+        {
+          "mRID": "D00000000000000000000000000000E2",
+          "description": "Import",
+          "roleFlags": "0001",
+          "flowDirection": 1,
+          "timeTariffIntervals": [
+            {
+              "mRID": "D00000000000000000000000000000E3",
+              "description": "Import off-peak",
+              "start": 0,
+              "duration": 3600,
+              "price": 2500
+            },
+            {
+              "mRID": "D00000000000000000000000000000E4",
+              "description": "Import peak",
+              "start": 3600,
+              "duration": 3600,
+              "price": 4500
+            }
+          ]
+        },
+        {
+          "mRID": "D00000000000000000000000000000E5",
+          "description": "Export",
+          "roleFlags": "0001",
+          "flowDirection": 19,
+          "timeTariffIntervals": [
+            {
+              "mRID": "D00000000000000000000000000000E6",
+              "description": "Export feed-in",
+              "start": 0,
+              "duration": 7200,
+              "price": 500
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

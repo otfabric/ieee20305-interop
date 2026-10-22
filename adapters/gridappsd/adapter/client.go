@@ -6,14 +6,12 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"path/filepath"
-	"reflect"
-	"slices"
 	"strings"
 	"time"
 
@@ -35,11 +33,27 @@ type resultError struct {
 	Detail string `json:"detail"`
 }
 
-var operations = map[string]func(context.Context, *inverter.SEP2Client, *Fixture, *result) error{
-	"discover":      opDiscover,
-	"register":      opRegister,
-	"poll-controls": opPollControls,
-	"report":        opReport,
+// opEnv is what an operation works with.
+type opEnv struct {
+	c            *inverter.SEP2Client
+	f            *Fixture
+	cfg          inverter.SimConfig // of c
+	tlsDir       string
+	notifyListen string
+	notifyHost   string
+}
+
+var operations = map[string]func(context.Context, *opEnv, *result) error{
+	"discover":         opDiscover,
+	"register":         opRegister,
+	"poll-controls":    opPollControls,
+	"report":           opReport,
+	"subscribe":        opSubscribe,
+	"respond":          opRespond,
+	"log-event":        opLogEvent,
+	"put-der":          opPutDER,
+	"flow-reservation": opFlowReservation,
+	"poll-pricing":     nil, // unsupported: the upstream has no pricing types
 }
 
 func runClient(args []string) int {
@@ -50,7 +64,8 @@ func runClient(args []string) int {
 	if op == "run" {
 		return exitCode(codedError{exitUnsupported, errors.New("client run is not implemented by the gridappsd adapter")})
 	}
-	fs, err := parseFlags(args[1:], "version", "url", "tls-dir", "fixture", "connect-timeout-ms", "timeout-ms", "payload")
+	fs, err := parseFlags(args[1:], "version", "url", "tls-dir", "fixture", "connect-timeout-ms", "timeout-ms", "payload",
+		"notify-listen", "notify-host")
 	if err != nil {
 		return exitCode(err)
 	}
@@ -74,8 +89,20 @@ func runClient(args []string) int {
 	if err != nil {
 		return exitCode(err)
 	}
-	if _, known := operations[op]; !known && op != "subscribe" {
+	if _, known := operations[op]; !known {
 		return exitCode(usagef("unknown client operation %q", op))
+	}
+	notifyListen := fs.get("notify-listen", "0.0.0.0:8443")
+	_, listenPort, err := net.SplitHostPort(notifyListen)
+	if err != nil || listenPort == "" {
+		return exitCode(usagef("--notify-listen %q is not host:port", notifyListen))
+	}
+	notifyHost, ok := fs.values["notify-host"]
+	if !ok {
+		host, _ := os.Hostname()
+		notifyHost = net.JoinHostPort(host, listenPort)
+	} else if notifyHost == "" || strings.ContainsAny(notifyHost, "/?#@ ") {
+		return exitCode(usagef("--notify-host %q is not HOST[:PORT]", notifyHost))
 	}
 	tlsDir, err := fs.required("tls-dir")
 	if err != nil {
@@ -88,12 +115,13 @@ func runClient(args []string) int {
 
 	res := &result{Operation: op}
 	start := time.Now()
-	code := exitOK
-	if op == "subscribe" {
-		res.Error = &resultError{Code: "unsupported", Detail: "subscriptions are not implemented by the gridappsd adapter"}
+	var code int
+	if why := clientUnsupported(op, fixture); why != "" {
+		res.Error = &resultError{Code: "unsupported", Detail: why}
 		code = exitUnsupported
 	} else {
-		code = perform(op, u, tlsDir, fixture, connectTimeout, timeout, res)
+		env := &opEnv{f: fixture, tlsDir: tlsDir, notifyListen: notifyListen, notifyHost: notifyHost}
+		code = perform(op, u, env, connectTimeout, timeout, res)
 	}
 	res.OK = code == exitOK
 	emit(map[string]any{
@@ -110,7 +138,7 @@ func runClient(args []string) int {
 	return code
 }
 
-func perform(op string, u *url.URL, tlsDir string, f *Fixture, connectTimeout, timeout time.Duration, res *result) int {
+func perform(op string, u *url.URL, env *opEnv, connectTimeout, timeout time.Duration, res *result) int {
 	// The upstream client dials through its own TLS stack; check first that
 	// the server can be reached at all, so that an unreachable server is a
 	// connect failure rather than an operation failure.
@@ -125,22 +153,31 @@ func perform(op string, u *url.URL, tlsDir string, f *Fixture, connectTimeout, t
 	}
 	conn.Close()
 
-	c, err := inverter.NewSEP2Client(inverter.SimConfig{
+	env.cfg = inverter.SimConfig{
 		ServerURL: "https://" + host,
-		CertFile:  filepath.Join(tlsDir, "client.crt"),
-		KeyFile:   filepath.Join(tlsDir, "client.key"),
-		CAFile:    filepath.Join(tlsDir, "ca.crt"),
-	})
+		CertFile:  filepath.Join(env.tlsDir, "client.crt"),
+		KeyFile:   filepath.Join(env.tlsDir, "client.key"),
+		CAFile:    filepath.Join(env.tlsDir, "ca.crt"),
+	}
+	c, err := inverter.NewSEP2Client(env.cfg)
 	if err != nil {
 		res.Error = &resultError{Code: "invalid-request", Detail: err.Error()}
 		return exitFailed
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	err = operations[op](ctx, c, f, res)
+	env.c = c
+	err = operations[op](ctx, env, res)
+	var coded codedError
 	switch {
 	case err == nil:
 		return exitOK
+	case errors.As(err, &coded):
+		res.Error = &resultError{Code: "invalid-request", Detail: err.Error()}
+		if coded.code == exitUnsupported {
+			res.Error.Code = "unsupported"
+		}
+		return coded.code
 	case isTLSFailure(err):
 		res.Error = &resultError{Code: "connect-failed", Detail: err.Error()}
 		return exitConnect
@@ -165,7 +202,8 @@ func isTLSFailure(err error) bool {
 	return strings.Contains(s, "tls:") || strings.Contains(s, "x509:") || strings.Contains(s, "handshake")
 }
 
-func opDiscover(ctx context.Context, c *inverter.SEP2Client, _ *Fixture, res *result) error {
+func opDiscover(ctx context.Context, env *opEnv, res *result) error {
+	c := env.c
 	res.Request = map[string]any{"method": "GET", "path": "/dcap"}
 	dc, err := c.Discover(ctx)
 	if err != nil {
@@ -196,7 +234,8 @@ func ownEndDevice(ctx context.Context, c *inverter.SEP2Client) (sep2.EndDevice, 
 	return ed, true, err
 }
 
-func opRegister(ctx context.Context, c *inverter.SEP2Client, f *Fixture, res *result) error {
+func opRegister(ctx context.Context, env *opEnv, res *result) error {
+	c, f := env.c, env.f
 	res.Request = map[string]any{"method": "GET", "path": "/edev"}
 	ed, created, err := ownEndDevice(ctx, c)
 	if created {
@@ -225,108 +264,8 @@ func opRegister(ctx context.Context, c *inverter.SEP2Client, f *Fixture, res *re
 	return nil
 }
 
-func opPollControls(ctx context.Context, c *inverter.SEP2Client, f *Fixture, res *result) error {
-	ed, _, err := ownEndDevice(ctx, c)
-	if err != nil {
-		return err
-	}
-	if ed.FunctionSetAssignmentsListLink == nil {
-		return errors.New("the EndDevice has no FunctionSetAssignmentsListLink")
-	}
-	res.Request = map[string]any{"method": "GET", "path": ed.FunctionSetAssignmentsListLink.Href}
-	fsas, _, err := c.GetFSAList(ctx, ed.FunctionSetAssignmentsListLink.Href)
-	if err != nil {
-		return err
-	}
-	var programs []map[string]any
-	served := map[string][]sep2.DERControl{} // controls served, by program description
-	for _, fsa := range fsas.FunctionSetAssignments {
-		if fsa.DERProgramListLink == nil {
-			continue
-		}
-		list, _, err := c.GetDERProgramList(ctx, fsa.DERProgramListLink.Href)
-		if err != nil {
-			return err
-		}
-		for _, p := range list.DERProgram {
-			entry := map[string]any{"program": p}
-			if _, ok := served[p.Description]; !ok {
-				served[p.Description] = nil
-			}
-			if p.DefaultDERControlLink != nil {
-				d, _, err := c.GetDefaultDERControl(ctx, p.DefaultDERControlLink.Href)
-				if err != nil {
-					return err
-				}
-				entry["defaultControl"] = d
-			}
-			if p.DERControlListLink != nil {
-				controls, _, err := c.GetDERControlList(ctx, p.DERControlListLink.Href)
-				if err != nil {
-					return err
-				}
-				entry["controls"] = controls.DERControl
-				served[p.Description] = append(served[p.Description], controls.DERControl...)
-				if len(controls.Rejected) > 0 {
-					entry["rejected"] = controls.Rejected
-				}
-			}
-			programs = append(programs, entry)
-		}
-	}
-	if len(programs) == 0 {
-		return errors.New("the device's function set assignments hold no DER program")
-	}
-	res.Response = map[string]any{"status": 200, "body": map[string]any{"derPrograms": programs}}
-	// The server was seeded with the fixture's programs and controls. A
-	// server picks its own mRIDs and may describe controls its own way, so
-	// programs are matched by description and controls by what they do.
-	for _, p := range f.DERPrograms {
-		controls, ok := served[p.Description]
-		if !ok {
-			return fmt.Errorf("the server does not serve the fixture's DER program %q", p.Description)
-		}
-		for _, fc := range p.Controls {
-			if !slices.ContainsFunc(controls, func(dc sep2.DERControl) bool { return controlMatches(fc, dc) }) {
-				return fmt.Errorf("the server does not serve the fixture's control %q of %q", fc.Description, p.Description)
-			}
-		}
-	}
-	return nil
-}
-
-// controlMatches reports whether a served DERControl has the fixture
-// control's duration and DERControlBase values.
-func controlMatches(fc Control, dc sep2.DERControl) bool {
-	if dc.Interval == nil || dc.Interval.Duration != fc.Duration || dc.DERControlBase == nil {
-		return false
-	}
-	b := dc.DERControlBase
-	got := map[string]any{}
-	if b.OpModConnect != nil {
-		got["opModConnect"] = *b.OpModConnect
-	}
-	if b.OpModEnergize != nil {
-		got["opModEnergize"] = *b.OpModEnergize
-	}
-	if b.OpModMaxLimW != nil {
-		got["opModMaxLimW"] = float64(*b.OpModMaxLimW)
-	}
-	if b.OpModFixedW != nil {
-		got["opModFixedW"] = float64(*b.OpModFixedW)
-	}
-	want := map[string]any{}
-	for name, raw := range fc.Base {
-		var v any
-		if json.Unmarshal(raw, &v) != nil {
-			return false
-		}
-		want[name] = v
-	}
-	return reflect.DeepEqual(got, want)
-}
-
-func opReport(ctx context.Context, c *inverter.SEP2Client, f *Fixture, res *result) error {
+func opReport(ctx context.Context, env *opEnv, res *result) error {
+	c, f := env.c, env.f
 	dc, err := c.Discover(ctx)
 	if err != nil {
 		return err

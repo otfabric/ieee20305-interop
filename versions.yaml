@@ -4,8 +4,8 @@
 # scripts/check-versions.sh fails when this file disagrees with them.
 
 interop_version: "0.1.0"
-contract_version: "0.2"        # docs/CONTAINER_CONTRACT.md (draft until 1.0); documents carry schemaVersion "1.0"
-fixture_schema: "1.0"          # schemas/fixture.schema.json
+contract_version: "0.3"        # docs/CONTAINER_CONTRACT.md (draft until 1.0); documents carry schemaVersion "1.0"
+fixture_schema: "1.1"          # schemas/fixture.schema.json
 
 protocol:
   name: "IEEE 2030.5"
@@ -37,14 +37,16 @@ implementations:
     tls_cipher_suites: ["TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8"]
     note: >-
       EPRI's C client (client_test, v0.2.11, unmaintained since 2018; schema
-      sep.xsd 2.0.4), built with its own build script against OpenSSL 3
-      after relaxing its OpenSSL 1.1.0 check, with one patch: the SHA-256
-      padding of its LFDI, which crashed for one certificate in eight. Runs
-      at OpenSSL security level 0 so that OpenSSL 3 offers CCM_8. Its
-      output is free text and it exits 0 whatever happens; the adapter
-      reads the documents it prints. register, discover and poll-controls;
-      report posts a MirrorUsagePoint of its own, so it is not offered.
-      Known issues: tests/known-bugs.tsv.
+      sep.xsd 2.0.4, namespace http://ieee.org/2030.5), built with its own build
+      script against OpenSSL 3 after relaxing its OpenSSL 1.1.0 check, with one
+      patch: the SHA-256 padding of its LFDI, which crashed for one certificate
+      in eight. Runs at OpenSSL security level 0 so that OpenSSL 3 offers CCM_8.
+      Its output is free text and it exits 0 whatever happens; the adapter reads
+      the documents it prints. register, discover, poll-controls, report
+      (client_test's own MirrorUsagePoint, not the fixture's) and respond;
+      log-event and put-der send EPRI's own documents, and subscribe is
+      commented out upstream, so they are not offered. Known issues:
+      tests/known-bugs.tsv.
 
   envoy:
     priority: P0
@@ -69,12 +71,16 @@ implementations:
     note: >-
       ANU/BSGIP Envoy, a Python/FastAPI IEEE 2030.5 server for CSIP-AUS
       (envoy_schema 2.7.0). One image runs PostgreSQL (Envoy's Alembic
-      migrations), the Envoy server and admin applications under uvicorn,
-      and HAProxy, which terminates mutual TLS and forwards the client
-      certificate's SHA-256 fingerprint in x-forwarded-client-cert. Devices
-      are seeded as sites through Envoy's CRUD layer, programs and controls
-      through its admin API. ALLOW_DEVICE_REGISTRATION=true, so an
-      unprovisioned device registers itself with a PIN Envoy picks.
+      migrations), the Envoy server and admin applications under uvicorn, and
+      HAProxy, which terminates mutual TLS and forwards the client certificate's
+      SHA-256 fingerprint in x-forwarded-client-cert. Devices are seeded as
+      sites through Envoy's CRUD layer. Programs, CSIP-AUS default controls and
+      limits, controls and tariffs go through its admin API, for a site group
+      that is Envoy's default group. ALLOW_DEVICE_REGISTRATION=true, so an
+      unprovisioned device registers itself with a PIN Envoy picks; the adapter
+      reports it (device-registered) by listing the sites. No subscriptions
+      (aggregator certificates only), no messaging or flow reservations. Known
+      issues: tests/known-bugs.tsv.
 
   py20305:
     priority: P0
@@ -93,10 +99,16 @@ implementations:
     versions_claimed: ["2018", "2023"]
     tls_cipher_suites: ["TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384", "TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8"]
     note: >-
-      Installed from the pinned source with every dependency from a hashed
-      lock (uv pip compile). The adapter drives the py20305 engine:
-      CsipClient discovery and registration, and its models for the
-      MirrorUsagePoint. It verifies the server's host name. No lock file
+      Installed from the pinned source with every dependency from a hashed lock
+      (uv pip compile). The adapter drives the py20305 engine: CsipClient
+      discovery (programs, default controls, controls, curves, tariffs) and
+      registration, Sep2Client for every request, its models for what it sends,
+      and its NotificationServer for subscribe. It verifies the server's host
+      name. flow-reservation is unsupported (py20305 has no client logic for
+      it). Against Envoy, put-der fails because py20305 writes the CSIP-AUS
+      extensions in https://csipaus.org/ns rather than /ns/v1.3, and
+      poll-pricing because py20305 rejects Envoy's non-schema TimeTariffInterval
+      RateComponentLink; both are in tests/known-bugs.tsv. No lock file
       upstream, so the lock is this repository's.
 
   gridappsd:
@@ -119,13 +131,22 @@ implementations:
     roles: [server, client]
     versions_claimed: ["2018", "2023"]
     tls_cipher_suites: ["TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8"]
+    patches: ["adapters/gridappsd/patches/0001-EndDevice-advertise-the-SubscriptionListLink.patch"]
     note: >-
-      The server role runs sep2server, provisions the devices of
-      --tls-dir/devices and the fixture's program and controls through its
-      admin API. The client role is built inside the client module and
-      drives its protocol engine (internal/inverter). Both use the
-      GridAPPS-D fork of crypto/tls and offer only the CCM_8 cipher suite.
-
+      The server role runs sep2server with one patch
+      (adapters/gridappsd/patches/0001: the EndDevice links its
+      SubscriptionListLink), provisions the devices of --tls-dir/devices and
+      seeds the fixture's programs, default controls and controls through its
+      admin API; its traffic capture gives the device-registered and
+      subscription-created events, and call issue-control issues a control
+      through the admin API. It delivers notifications with Go's standard TLS,
+      trusting the test CA (SSL_CERT_FILE). Curves cannot be seeded and read
+      back (boot fixture only, no GET /dc/{id}). The client role is built
+      inside the client module and drives its protocol engine
+      (internal/inverter); it does not declare subscribe, because its
+      notification listener is CCM_8-only and requires a client certificate,
+      which sep2server's delivery has neither of. Both roles use the GridAPPS-D
+      fork of crypto/tls and offer only the CCM_8 cipher suite.
 images:
   epri: "ghcr.io/otfabric/ieee20305-interop-epri"
   envoy: "ghcr.io/otfabric/ieee20305-interop-envoy"

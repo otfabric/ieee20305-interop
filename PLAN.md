@@ -36,12 +36,16 @@ otfabric/go-ieee20305, is in that repository's IMPLEMENTATION_PLAN.md.
       which forwards the client certificate's fingerprint
 - [x] `epri` adapter: C client, CCM_8 only, with one patch (SHA-256
       padding); two known upstream issues
-- [ ] Control socket and `call`, `client run`, subscriptions, and the events
+- [x] Contract 0.3: subscriptions and notifications, `call issue-control`,
+      the server events, respond, log-event, put-der, flow-reservation,
+      poll-pricing; fixture schema 1.1 with the `csip` and `csip-aus` fixtures
+- [ ] `client run` and the client events
 - [ ] Contract 1.0, once the adapters close the gaps
 
 ## Phase 3 - Profiles and versions (open)
 
-- [ ] CSIP profile support across adapters
-- [ ] CSIP-AUS profile (envoy's strength)
+- [x] CSIP profile: several programs, default controls (`csip` fixture)
+- [x] CSIP-AUS profile: dynamic operating envelopes and tariffs (`csip-aus`)
+- [ ] Curves and messaging: no server adapter serves them yet
 - [ ] IEEE 2030.5-2023 additions where upstreams support them
-- [ ] Subscription and notification testing
+- [x] Subscription and notification testing (py20305 to GridAPPS-D)

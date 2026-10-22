@@ -63,7 +63,13 @@
   "$defs": {
     "operation": {
       "type": "string",
-      "enum": ["register", "discover", "poll-controls", "report", "subscribe"]
+      "enum": ["register", "discover", "poll-controls", "report", "subscribe", "respond", "log-event", "put-der",
+               "flow-reservation", "poll-pricing"]
+    },
+    "call": {
+      "type": "string",
+      "description": "An operation of `call` (docs/CONTAINER_CONTRACT.md#call).",
+      "enum": ["issue-control"]
     },
     "role": {
       "type": "object",
@@ -74,6 +80,24 @@
         "operations": {
           "type": "array",
           "items": {"$ref": "#/$defs/operation"},
+          "uniqueItems": true
+        },
+        "fixtures": {
+          "type": "array",
+          "description": "The baked fixtures this role runs with: a server is seeded with them, a client sends and checks them. Contract 0.3; absent means baseline only.",
+          "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+          "uniqueItems": true
+        },
+        "calls": {
+          "type": "array",
+          "description": "The operations `call` performs in this role. Contract 0.3; absent means none.",
+          "items": {"$ref": "#/$defs/call"},
+          "uniqueItems": true
+        },
+        "events": {
+          "type": "array",
+          "description": "The optional events this role writes (docs/CONTAINER_CONTRACT.md#events). Contract 0.3; absent means none.",
+          "items": {"enum": ["device-registered", "subscription-created", "request-received"]},
           "uniqueItems": true
         }
       }
@@ -91,7 +115,12 @@
             "mTLS": {"type": "boolean", "description": "Mutual TLS with device certificates (LFDI/SFDI identity)"},
             "csip": {"type": "boolean", "description": "Common Smart Inverter Profile (CSIP) compliance"},
             "csipAus": {"type": "boolean", "description": "CSIP-AUS (Australian) profile compliance"},
-            "subscription": {"type": "boolean", "description": "IEEE 2030.5 Subscription/Notification mechanism"}
+            "subscription": {"type": "boolean", "description": "IEEE 2030.5 Subscription/Notification mechanism"},
+            "defaultControl": {"type": "boolean", "description": "DefaultDERControl"},
+            "curves": {"type": "boolean", "description": "DERCurves"},
+            "pricing": {"type": "boolean", "description": "Pricing: TariffProfile, RateComponent, TimeTariffInterval"},
+            "messaging": {"type": "boolean", "description": "Messaging: MessagingProgram, TextMessage"},
+            "flowReservation": {"type": "boolean", "description": "FlowReservationRequest and FlowReservationResponse"}
           },
           "additionalProperties": {"type": "boolean"}
         },
