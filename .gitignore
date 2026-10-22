@@ -13,3 +13,6 @@ reports/
 
 # Throwaway PKI of make pki
 tls/
+
+# Request logs of a local sep2server run
+adapters/gridappsd/adapter/etc/
