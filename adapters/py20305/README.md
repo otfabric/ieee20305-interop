@@ -69,8 +69,9 @@ on stderr.
   writes the CSIP-AUS extensions in the namespace `https://csipaus.org/ns`,
   but Envoy expects `https://csipaus.org/ns/v1.3` and refuses the
   DERCapability PUT; with the v1.3 namespace Envoy accepts all four PUTs.
-  Envoy's TimeTariffIntervals carry a `RateComponentLink` that no schema
-  defines, and py20305's parser, which has no lenient mode, rejects them.
+  CSIP-AUS 1.3 (`csipaus-core-v1.3.xsd`) requires a `RateComponentLink` in
+  each TimeTariffInterval, which Envoy serves; py20305 does not model it, and
+  its parser, which has no lenient mode, rejects them.
   GridAPPS-D serves neither a DERList nor tariffs.
 - Curves are checked, but no server of the self-tests serves them, so no
   baked fixture has them and the `curves` feature is not declared.

@@ -83,11 +83,12 @@ limit below.
 - `put-der`: Envoy requires `csipaus:doeModesSupported` (namespace
   `https://csipaus.org/ns/v1.3`) in a DERCapability, as CSIP-AUS makes it
   mandatory; the fixtures carry it, and a DERCapability without it is 400.
-- `poll-pricing`: tariffs are seeded and served, but Envoy
-  puts its CSIP-AUS extension `RateComponentLink` in the IEEE 2030.5
-  namespace of each TimeTariffInterval, which a schema-checking client
-  (py20305) refuses: a known issue (tests/known-bugs.tsv), so the `pricing`
-  feature is not declared. Envoy serves no TimeTariffInterval description, and
+- `poll-pricing`: tariffs are seeded and served, with the
+  `RateComponentLink` that CSIP-AUS 1.3 (`csipaus-core-v1.3.xsd`) requires
+  in each TimeTariffInterval. py20305, the only pricing client of the
+  self-tests, does not model that element and refuses the list: a known
+  issue of py20305 (tests/known-bugs.tsv), so the `pricing` feature is not
+  declared. Envoy serves no TimeTariffInterval description, and
   knows the currencies 0, 36, 124, 840 and 978 only. Messaging is not
   served: a fixture with `messages` is exit 5.
 - `subscribe` is not declared: Envoy lets only aggregator certificates

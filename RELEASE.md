@@ -23,7 +23,7 @@ Makefile's `ADAPTERS`, or the release fails.
 
 ## v0.2.0
 
-**Date:** unreleased  
+**Date:** 2026-10-23  
 **Previous release:** v0.1.0
 
 ### Summary
@@ -92,9 +92,9 @@ operating envelopes, each tested as far as each stack allows.
 - No baked fixture has curves (sep2server cannot serve them), and no server
   can be seeded with messages.
 - Upstream defects in `tests/known-bugs.tsv`: py20305 writes CSIP-AUS
-  extensions in an older namespace than Envoy reads (`put-der`); Envoy adds
-  a non-schema element to its TimeTariffIntervals, which py20305 refuses
-  (`poll-pricing`); EPRI's client crashes on GridAPPS-D's long hrefs,
+  extensions in an older namespace than Envoy reads (`put-der`), and does
+  not model the `RateComponentLink` that CSIP-AUS 1.3 requires in a
+  TimeTariffInterval, so it refuses Envoy's tariffs (`poll-pricing`); EPRI's client crashes on GridAPPS-D's long hrefs,
   sends the draft 2.0.4 namespace, and cannot parse Envoy's EndDevice.
 - `client run` is not implemented.
 

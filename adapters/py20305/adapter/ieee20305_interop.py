@@ -245,9 +245,9 @@ def capabilities() -> dict[str, Any]:
         "https://csipaus.org/ns/v1.3 (envoy_schema 2.7.0 server/schema/sep2/base.py:8) and answers the "
         "DERCapability PUT with 400, doeModesSupported missing (with the v1.3 namespace Envoy accepts all four "
         "PUTs); GridAPPS-D serves no DERList.",
-        "poll-pricing (2018) fails against Envoy, a known issue: Envoy puts a RateComponentLink in the IEEE 2030.5 "
-        "namespace into each TimeTariffInterval (src/envoy/server/mapper/sep2/pricing.py:373), which neither "
-        "sep.xsd nor the CSIP-AUS schema define, and py20305's parser, which has no lenient option "
+        "poll-pricing (2018) fails against Envoy, a known issue: CSIP-AUS 1.3 (csipaus-core-v1.3.xsd) extends "
+        "TimeTariffInterval with a mandatory RateComponentLink in the IEEE 2030.5 namespace, which Envoy serves "
+        "(src/envoy/server/mapper/sep2/pricing.py:373); py20305 does not model it, and its parser, which has no lenient option "
         "(xml/serialization.py from_xml), rejects the TimeTariffIntervalList "
         "(discovery.py _discover_rate_component skips it), so no interval is found; GridAPPS-D serves no "
         "tariffs.",
