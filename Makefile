@@ -57,8 +57,9 @@ ci: validate lint images ## Full local CI: validate, lint, build, smoke and cros
 
 validate: versions schemas fixtures ## Validate versions.yaml, the schemas and every fixture
 
-versions: ## Check that versions.yaml agrees with the Dockerfiles
+versions: ## Check that versions.yaml agrees with the Dockerfiles, and that RELEASE.md has its notes
 	@scripts/check-versions.sh
+	@scripts/release-notes.sh > /dev/null && echo "ok   RELEASE.md has the notes of interop_version"
 
 schemas: ## Check that every JSON schema is a valid draft 2020-12 schema
 	@echo "Checking schemas..."
@@ -242,7 +243,7 @@ digests: ## Print "<adapter> <digest>" of the published multi-arch images of VER
 
 # ── Release ───────────────────────────────────────────────────────────────────
 
-release-prep: ## Turn the "## Unreleased" notes into VERSION and set interop_version (VERSION=vX.Y.Z)
+release-prep: ## Date the "## VERSION" notes in RELEASE.md and set interop_version (VERSION=vX.Y.Z)
 	@scripts/release-prep.py "$(VERSION)"
 
 release-check: ## Check that the tree can be released as VERSION, as the Release workflow does (VERSION=vX.Y.Z)

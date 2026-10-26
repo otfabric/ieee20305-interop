@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Writes manifest.json and the body of the GitHub release.
+"""Writes manifest.json and the images part of the body of the GitHub release.
 
-    scripts/release-manifest.py <version> <commit> <digests file> <manifest out> <body out>
+    scripts/release-manifest.py <version> <commit> <digests file> <manifest out> <images out>
 
 The digests file holds one "<adapter> <sha256:...>" line per published
 multi-arch image (make digests); the release workflow refuses an empty one.
 Upstream pins are read from the adapter Dockerfiles, the contract and fixture
-versions from versions.yaml, and the notes from the version's section of
-RELEASE.md, up to the --- that ends it.
+versions from versions.yaml. The release workflow puts the notes
+(scripts/release-notes.sh: the version's section of RELEASE.md, up to the ---
+that ends it) in front of the images part.
 """
 
 import json
@@ -46,17 +47,10 @@ def manifest_value(key: str) -> str:
     return match.group(1)
 
 
-def notes(version: str) -> str:
-    match = re.search(rf"^## {re.escape(version)}\n(.*?)^---$", (ROOT / "RELEASE.md").read_text(), re.M | re.S)
-    if not match:
-        raise SystemExit(f"RELEASE.md has no section {version} ended by ---")
-    return match.group(1).strip() + "\n"
-
-
 def main() -> None:
     if len(sys.argv) != 6:
         raise SystemExit(__doc__)
-    version, commit, digests_file, manifest_out, body_out = sys.argv[1:]
+    version, commit, digests_file, manifest_out, images_out = sys.argv[1:]
     if not re.fullmatch(r"v\d+\.\d+\.\d+", version):
         raise SystemExit(f"{version!r} is not a vX.Y.Z version")
     if manifest_value("interop_version") != version[1:]:
@@ -83,7 +77,7 @@ def main() -> None:
         "images": images,
     }, indent=2) + "\n")
 
-    body = [notes(version), "## Images", "", "| Image | Upstream | Digest |", "|-------|----------|--------|"]
+    body = ["## Images", "", "| Image | Upstream | Digest |", "|-------|----------|--------|"]
     for adapter, digest in digests.items():
         pin = upstream[adapter]["version"]
         if "client" in upstream[adapter]:
@@ -100,7 +94,7 @@ def main() -> None:
         "`THIRD_PARTY_NOTICES.md` and `/licenses` in each image.",
         "",
     ]
-    Path(body_out).write_text("\n".join(body))
+    Path(images_out).write_text("\n".join(body))
 
 
 if __name__ == "__main__":

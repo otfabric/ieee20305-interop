@@ -35,6 +35,8 @@ jobs:
       - run: pip install jsonschema
       - name: versions.yaml matches the build files
         run: make versions
+      - name: RELEASE.md has the notes of interop_version
+        run: scripts/release-notes.sh > /dev/null
       - name: Schemas
         run: make schemas
       - name: Fixtures

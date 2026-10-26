@@ -17,20 +17,14 @@ if ! grep -qF "${want}" versions.yaml; then
     echo "FAIL versions.yaml does not say ${want}"
     status=1
 fi
-# The version's section: from its heading up to the --- that ends it.
-section=$(awk -v h="## ${version}" '$0 == h { on = 1 } on { print } on && /^---$/ { exit }' RELEASE.md)
-if [[ -z "${section}" ]]; then
-    echo "FAIL RELEASE.md has no section \"## ${version}\""
+# The version's notes: from its heading up to the --- that ends it, exactly
+# what the Release workflow publishes (scripts/release-notes.sh).
+if ! section=$(scripts/release-notes.sh "${version}" 2>&1); then
+    echo "FAIL ${section}"
     status=1
-else
-    if [[ "$(tail -1 <<<"${section}")" != "---" ]]; then
-        echo "FAIL the RELEASE.md section of ${version} is not ended by a --- line"
-        status=1
-    fi
-    if ! grep -qE '^\*\*Date:\*\* [0-9]{4}-[0-9]{2}-[0-9]{2}' <<<"${section}"; then
-        echo "FAIL the RELEASE.md section of ${version} is not dated (run make release-prep VERSION=${version})"
-        status=1
-    fi
+elif ! grep -qE '^\*\*Date:\*\* [0-9]{4}-[0-9]{2}-[0-9]{2}' <<<"${section}"; then
+    echo "FAIL the RELEASE.md section of ${version} is not dated (run make release-prep VERSION=${version})"
+    status=1
 fi
 [[ "${status}" -eq 0 ]] && echo "ok   ready to release ${version}"
 exit "${status}"
