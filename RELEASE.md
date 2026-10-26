@@ -21,6 +21,17 @@ them into a multi-arch index on GHCR, and creates the GitHub release with
 Consumers pin the digests. Every adapter with a Dockerfile must be in the
 Makefile's `ADAPTERS`, or the release fails.
 
+The notes are the body of the GitHub release, followed by the image digests:
+everything after the heading `## vX.Y.Z` up to the next line that is exactly
+`---` (`scripts/release-notes.sh vX.Y.Z` prints it). This is the format of
+every otfabric repository and the rule of the shared release workflow, so:
+one section per version, newest first, each ending with a `---` line, and no
+`---` line inside a section. `make validate` (and CI) fails when RELEASE.md
+has no notes for `interop_version`; the `Release` workflow fails, before
+anything is built, when it has none for the tag.
+
+---
+
 ## v0.2.0
 
 **Date:** 2026-10-23  

@@ -38,6 +38,8 @@ jobs:
         run: |
           make validate
           scripts/release-check.sh "${VERSION}"
+          # The notes of this version become the body of the GitHub release.
+          scripts/release-notes.sh "${VERSION}" > /dev/null || { echo "::error::RELEASE.md has no notes for ${VERSION}"; exit 1; }
       - name: Every built adapter is in the Makefile
         run: |
           adapters=" $(sed -nE 's/^ADAPTERS \?= //p' Makefile) "
@@ -119,16 +121,27 @@ jobs:
           done < digests.txt
           [[ -s digests.txt ]] || { echo "::error::no image digests"; exit 1; }
 
-      - name: Write manifest.json and the release notes
+      - name: Write manifest.json
         run: |
-          scripts/release-manifest.py "${VERSION}" "${GITHUB_SHA}" digests.txt manifest.json release-body.md
-          cat manifest.json release-body.md
+          scripts/release-manifest.py "${VERSION}" "${GITHUB_SHA}" digests.txt manifest.json "${RUNNER_TEMP}/release-images.md"
+          cat manifest.json
           sha256sum manifest.json > checksums.txt
+
+      # The body is the section of this version in RELEASE.md (up to its
+      # "---", as in every otfabric repository), followed by the images.
+      - name: Write the release body
+        run: |
+          {
+            scripts/release-notes.sh "${VERSION}"
+            echo
+            cat "${RUNNER_TEMP}/release-images.md"
+          } > "${RUNNER_TEMP}/release-body.md"
+          cat "${RUNNER_TEMP}/release-body.md"
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3
         with:
-          body_path: release-body.md
+          body_path: ${{ runner.temp }}/release-body.md
           files: |
             manifest.json
             checksums.txt
