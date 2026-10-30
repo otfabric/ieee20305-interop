@@ -9,7 +9,7 @@ run-name: "Upstream check (${{ github.event_name }})"
 # issue "Upstream releases: pins behind the latest", which is opened or
 # updated (with a comment when a new version shows up) and closed once every
 # pin is current. Pins are never changed here: a bump is a reviewed change.
-# Shared steps: https://github.com/otfabric/.github/tree/main/actions
+# Shared steps: https://github.com/otfabric/.github/tree/main/actions.1.1
 on:
   schedule:
     - cron: "27 0 * * *"
@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-      - uses: otfabric/.github/actions/upstream-images@v2.1.0
+      - uses: otfabric/.github/actions/upstream-images@v2.1.0.1.1
 
   candidate:
     name: ${{ matrix.stack }}
@@ -60,7 +60,7 @@ jobs:
       - name: Build and self-test at the latest release
         id: test
         if: steps.resolve.outputs.update == 'yes'
-        uses: otfabric/.github/actions/upstream-candidate@v2.1.0
+        uses: otfabric/.github/actions/upstream-candidate@v2.1.0.1.1
         with:
           name: ${{ matrix.stack }}
           pinned: ${{ steps.resolve.outputs.pin }}
@@ -81,7 +81,7 @@ jobs:
 
       - name: Table row
         if: always()
-        uses: otfabric/.github/actions/upstream-row@v2.1.0
+        uses: otfabric/.github/actions/upstream-row@v2.1.0.1.1
         with:
           component: ${{ matrix.stack }}
           source: ${{ steps.resolve.outputs.source }}
@@ -103,7 +103,7 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: otfabric/.github/actions/upstream-report@v2.1.0
+      - uses: otfabric/.github/actions/upstream-report@v2.1.0.1.1
         with:
           needs: ${{ toJSON(needs) }}
           notes: |
