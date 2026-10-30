@@ -17,6 +17,9 @@ FAIL=0
 KNOWN=0
 SKIPPED=0
 
+# shellcheck source=scripts/results.sh
+source "$(dirname "${BASH_SOURCE[0]}")/results.sh"
+
 log()  { echo "[$(basename "$0" .sh)] $*" >&2; }
 ok()   { PASS=$((PASS + 1)); [[ -n "${VERBOSE:-}" ]] && log "ok: ${CHECK_PREFIX:-}$*"; return 0; }
 fail() { FAIL=$((FAIL + 1)); log "FAIL: ${CHECK_PREFIX:-}$*"; return 0; }
@@ -335,7 +338,8 @@ finish() {
     [[ "${KNOWN}" -gt 0 ]] && extra="${extra}, ${KNOWN} known upstream bugs"
     [[ "${SKIPPED}" -gt 0 ]] && extra="${extra}, ${SKIPPED} skipped (capability not declared)"
     log "${PASS} passed, ${FAIL} failed${extra}"
-    [[ "${FAIL}" -eq 0 ]]
+    results_close || FAIL=$((FAIL + 1))
+    [[ "${FAIL}" -eq 0 && "${PASS}" -gt 0 ]]
 }
 
 KNOWN_BUGS="${ROOT}/tests/known-bugs.tsv"

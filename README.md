@@ -29,6 +29,10 @@ make pki         # throwaway TLS material in ./tls for local work
 docker compose up -d --wait   # the reference servers on 127.0.0.1
 ```
 
+`REPORT_DIR=reports make interop` also writes `reports/results.json`, the
+organisation's [interop-result-v1](schemas/interop-result-v1.schema.json). A run
+with no pass, or with a known bug that no longer reproduces, fails.
+
 Everything runs with mutual TLS. The tests generate certificates at run time;
 none are committed or baked into the images.
 
