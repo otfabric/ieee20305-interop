@@ -22,7 +22,8 @@
 # version one side does not declare, or no TLS cipher suite in common),
 # KNOWN_ISSUE (a failure tests/known-bugs.tsv explains) or INFRA_ERROR.
 # A known-bug entry whose tests ran and passed fails the run, so the list
-# cannot go stale (REQUIREMENTS.md R4.4).
+# cannot go stale (REQUIREMENTS.md R4.4). The run is also written as
+# results.json (interop-result-v1) in REPORT_DIR; a run with no pass fails.
 #
 # Environment: REGISTRY, VERSION (image tag, default dev), VERBOSE=1,
 #              REPORT_DIR (keeps every result document and the report),
@@ -40,7 +41,8 @@ read -r -a VERSIONS <<<"${IEEE20305_VERSIONS:-2018 2023}"
 SERIAL=$(jq -r '.device.serial' "${ROOT}/fixtures/baseline/fixture.json")
 require_tools
 WORK=$(mktemp -d)
-trap 'rm -rf "${WORK}"; cleanup' EXIT
+trap 'results_abort; rm -rf "${WORK}"; cleanup' EXIT
+results_open interop "${REPORT_DIR:-${WORK}}" "VERSION=${VERSION} IEEE20305_VERSIONS='${VERSIONS[*]}' scripts/interop.sh $*"
 network_up
 STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 : > "${WORK}/results.jsonl"
@@ -81,12 +83,13 @@ keep() {
 
 # record <test id> <client> <server> <operation> <status> <duration ms> [<error>]
 record() {
-    local id="$1" client="$2" server="$3" operation="$4" status="$5" ms="$6" note="${7:-}" bug
+    local id="$1" client="$2" server="$3" operation="$4" status="$5" ms="$6" note="${7:-}" bug waiver_id=""
     if bug=$(known_bug "${client}" "${server}" "${id}"); then
         # Only a test that ran can show that an entry no longer reproduces.
         [[ "${status}" == PASS || "${status}" == FAIL ]] && echo "${bug%%$'\t'*}" >> "${WORK}/known-ran"
         if [[ "${status}" == FAIL ]]; then
             status=KNOWN_ISSUE; note="${note} (known: ${bug#*$'\t'})"
+            waiver_id=$(sed -n "${bug%%$'\t'*}p" "${KNOWN_BUGS}" | cut -f6)
             echo "${bug%%$'\t'*}" >> "${WORK}/known-hit"
         fi
     fi
@@ -95,6 +98,15 @@ record() {
         FAIL|INFRA_ERROR) fail "${client}->${server}: ${id}: ${note}" ;;
         KNOWN_ISSUE) KNOWN=$((KNOWN + 1)) ;;
         SKIP_UNSUPPORTED) SKIPPED=$((SKIPPED + 1)); [[ -n "${VERBOSE:-}" ]] && log "skip ${client}->${server}: ${id}: ${note}" ;;
+    esac
+    at "${id}" "${client}" "${server}"
+    RESULT_T0=$((RESULT_T0 - ms)) RESULT_FEATURE="${operation}"
+    case "${status}" in
+        PASS) result pass ;;
+        FAIL) result fail "${note}" ;;
+        KNOWN_ISSUE) result known-difference "${note}" "${waiver_id}" ;;
+        SKIP_UNSUPPORTED) result unsupported "${note}" ;;
+        INFRA_ERROR) result infra-error "${note}" ;;
     esac
     jq -cn --arg id "${id}" --arg v "${CURRENT_VERSION}" --argjson c "$(impl "${client}")" --argjson s "$(impl "${server}")" \
         --arg op "${operation}" --arg st "${status}" --argjson ms "${ms}" --arg note "${note}" '
@@ -243,7 +255,11 @@ done
 # ---- stale known-bug entries: their tests ran and none failed ----
 while read -r line; do
     [[ -n "${line}" ]] || continue
-    if ! grep -qx "${line}" "${WORK}/known-hit"; then
+    reproduced=false
+    grep -qx "${line}" "${WORK}/known-hit" && reproduced=true
+    IFS=$'\t' read -r scope _ _ evidence _ waiver_id < <(sed -n "${line}p" "${KNOWN_BUGS}")
+    waiver "${waiver_id}" "${scope}" "${evidence}" "${reproduced}"
+    if [[ "${reproduced}" != true ]]; then
         fail "tests/known-bugs.tsv line ${line} no longer reproduces: remove it"
     fi
 done < <(sort -u "${WORK}/known-ran")

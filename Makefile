@@ -41,7 +41,7 @@ export REGISTRY VERSION
 # image-%, smoke-%, run-% and candidate-% are pattern rules, which make
 # ignores for .PHONY targets: they depend on FORCE instead.
 .PHONY: help all ci validate versions schemas fixtures lint images smoke interop selftest \
-        capabilities pki lock-py20305 lock-envoy release-prep release-check buildx-setup buildx publish publish-arch publish-manifest digests documents run-% clean FORCE
+        unittests capabilities pki lock-py20305 lock-envoy release-prep release-check buildx-setup buildx publish publish-arch publish-manifest digests documents run-% clean FORCE
 FORCE:
 
 help: ## Show this help
@@ -55,7 +55,10 @@ ci: validate lint images ## Full local CI: validate, lint, build, smoke and cros
 
 # ── Validation ───────────────────────────────────────────────────────────────
 
-validate: versions schemas fixtures ## Validate versions.yaml, the schemas and every fixture
+validate: versions schemas fixtures unittests ## Validate versions.yaml, the schemas and every fixture
+
+unittests: ## Unit tests of the result scripts
+	@$(PYTHON) -m unittest discover -q -s scripts -p 'test_*.py'
 
 versions: ## Check that versions.yaml agrees with the Dockerfiles, and that RELEASE.md has its notes
 	@scripts/check-versions.sh

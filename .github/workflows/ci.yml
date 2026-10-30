@@ -37,6 +37,8 @@ jobs:
         run: make versions
       - name: RELEASE.md has the notes of interop_version
         run: scripts/release-notes.sh > /dev/null
+      - name: Unit tests of the result scripts
+        run: make unittests
       - name: Schemas
         run: make schemas
       - name: Fixtures
