@@ -138,7 +138,10 @@ lock-envoy: ## Regenerate adapters/envoy/build-requirements.txt (hashed); Envoy'
 		       --output-file build-requirements.txt build-requirements.in'
 	@echo "adapters/envoy/build-requirements.txt updated"
 
-# ── Upstream candidates ───────────────────────────────────────────────────────
+# ── Candidates ────────────────────────────────────────────────────────────────
+# Builds one adapter on another upstream than its pin and self-tests it against
+# the other adapters at their pins. The Upstream workflow (upstream.yml) runs
+# this every day for every stack whose pin is behind the latest release.
 
 CANDIDATE_VERSION ?=
 CANDIDATE_SHA     ?=

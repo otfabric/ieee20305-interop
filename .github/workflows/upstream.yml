@@ -1,0 +1,121 @@
+name: Upstream
+run-name: "Upstream check (${{ github.event_name }})"
+
+# Daily check of every pin against the latest upstream: the release of every
+# stack the adapters pin (scripts/latest-upstream.py) and the digest of every
+# base image. A stack whose pin is behind is built at the latest release and
+# self-tested against the pinned other stacks (once per pin -> latest pair;
+# later runs reuse that result). The table goes to the Job Summary and to the
+# issue "Upstream releases: pins behind the latest", which is opened or
+# updated (with a comment when a new version shows up) and closed once every
+# pin is current. Pins are never changed here: a bump is a reviewed change.
+# Shared steps: https://github.com/otfabric/.github/tree/main/actions
+on:
+  schedule:
+    - cron: "27 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream
+  cancel-in-progress: false
+
+env:
+  # Nothing is pulled from Docker Hub: anonymous pulls are rate limited per
+  # runner address. Base images (pinned by digest) and build tooling come
+  # from Google's mirror of it (see ci.yml).
+  BASE_REGISTRY: mirror.gcr.io/library
+  TOOLS_REGISTRY: mirror.gcr.io
+
+jobs:
+  images:
+    name: Base images
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: otfabric/.github/actions/upstream-images@main
+
+  candidate:
+    name: ${{ matrix.stack }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every upstream an image pins: gridappsd-client is the second
+        # upstream of the gridappsd image.
+        stack: [gridappsd, gridappsd-client, py20305, envoy, epri]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve the pin against upstream
+        id: resolve
+        run: scripts/latest-upstream.py "${{ matrix.stack }}" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Build and self-test at the latest release
+        id: test
+        if: steps.resolve.outputs.update == 'yes'
+        uses: otfabric/.github/actions/upstream-candidate@main
+        with:
+          name: ${{ matrix.stack }}
+          pinned: ${{ steps.resolve.outputs.pin }}
+          latest: ${{ steps.resolve.outputs.latest }}
+          result-pattern: '^\[interop\] [0-9]+ passed'
+          command: >-
+            make images &&
+            make "candidate-${{ steps.resolve.outputs.adapter }}"
+            CANDIDATE_ARGS="${{ steps.resolve.outputs.candidate_args }}"
+
+      - name: Known bugs of the latest release
+        id: known
+        if: always()
+        run: |
+          known=$(awk -F'\t' -v a="${{ steps.resolve.outputs.adapter }}" -v v="${{ steps.resolve.outputs.latest }}" \
+            '!/^#/ { split($1, who, /[:@]/) } !/^#/ && who[1] == a && $2 == v { printf "%s%s", sep, $4; sep = "; " }' tests/known-bugs.tsv)
+          echo "known=${known}" >> "$GITHUB_OUTPUT"
+
+      - name: Table row
+        if: always()
+        uses: otfabric/.github/actions/upstream-row@main
+        with:
+          component: ${{ matrix.stack }}
+          source: ${{ steps.resolve.outputs.source }}
+          pinned: ${{ steps.resolve.outputs.pin }}
+          latest: ${{ steps.resolve.outputs.latest }}
+          update: ${{ steps.resolve.outputs.update }}
+          detail: ${{ steps.resolve.outcome == 'failure' && 'upstream lookup failed (see the job log)' || '' }}
+          test-outcome: ${{ steps.test.outputs.outcome }}
+          test-result: ${{ steps.test.outputs.result }}
+          test-cached: ${{ steps.test.outputs.cached }}
+          known: ${{ steps.known.outputs.known }}
+
+  report:
+    name: Report
+    runs-on: ubuntu-latest
+    needs: [images, candidate]
+    if: always()
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: otfabric/.github/actions/upstream-report@main
+        with:
+          needs: ${{ toJSON(needs) }}
+          notes: |
+            ### To update
+
+            - **Library:** move `ARG UPSTREAM_VERSION` and `ARG UPSTREAM_SHA` (gridappsd-client:
+              `CLIENT_VERSION` and `CLIENT_SHA` of the gridappsd image) in
+              `adapters/<adapter>/Dockerfile` and `versions.yaml`; `make versions` checks that they
+              agree. Regenerate a lock file where the adapter has one (`make lock-py20305`,
+              `make lock-envoy`). Reproduce a candidate with
+              `make candidate-<adapter> CANDIDATE_ARGS="UPSTREAM_VERSION=<version> UPSTREAM_SHA=<commit>"`
+              (`scripts/latest-upstream.py <stack>` prints the arguments); a `failure` needs the
+              self-test log of the run first. Known-bug entries are tied to the pinned version, so
+              a bug that persists in the candidate fails it: a release that fails the self-tests
+              stays a candidate, list its bug in `tests/known-bugs.tsv`.
+            - **Base image:** replace the digest in every file that pins it.
+            - Note the change in `RELEASE.md`.
