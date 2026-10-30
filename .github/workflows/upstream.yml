@@ -74,7 +74,7 @@ jobs:
         if: always()
         run: |
           known=$(awk -F'\t' -v a="${{ steps.resolve.outputs.adapter }}" -v v="${{ steps.resolve.outputs.latest }}" \
-            '!/^#/ { split($1, who, /[:@]/) } !/^#/ && who[1] == a && $2 == v { printf "%s%s", sep, $4; sep = "; " }' tests/known-bugs.tsv)
+            '!/^#/ { split($1, who, /[:@]/) } !/^#/ && who[1] == a && $2 == v { printf "%s%s", sep, $5; sep = "; " }' tests/known-bugs.tsv)
           echo "known=${known}" >> "$GITHUB_OUTPUT"
 
       - name: Table row
