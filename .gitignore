@@ -16,3 +16,12 @@ tls/
 
 # Request logs of a local sep2server run
 adapters/gridappsd/adapter/etc/
+
+# Build artefacts live in /bin/ and /release/ (otfabric/engineering REPO-005)
+/bin/
+/release/
+*.test
+coverage.out
+
+# Output of a bare `go build`, anchored so it can never hide a source folder
+/adapters/gridappsd/adapter/adapter
