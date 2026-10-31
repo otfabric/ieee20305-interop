@@ -32,6 +32,18 @@ anything is built, when it has none for the tag.
 
 ---
 
+## v0.3.0
+
+**Date:** 2026-10-31
+**Previous release:** v0.2.0
+
+### Added
+
+- Adds `results.json` in the interop-result-v1 format.
+- Policy 1.2: build output in `bin/` and `release/`, and shared CI at v3.3.0.
+
+---
+
 ## v0.2.0
 
 **Date:** 2026-10-23  
