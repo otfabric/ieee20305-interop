@@ -1,6 +1,7 @@
 # ieee20305-interop Releases
 
-Releases are made by the `Release` workflow when a `vX.Y.Z` tag is pushed.
+Releases are made by the `Release` workflow, run by hand with a version bump
+or on a pushed `vX.Y.Z` tag.
 The section of the version below, up to the `---` that ends it, is the
 release's notes.
 
@@ -11,7 +12,9 @@ release's notes.
    through a pull request.
 2. On the merged `main`, `make release-check VERSION=vX.Y.Z` (and `make ci`)
    verifies it.
-3. Tag that commit `vX.Y.Z` and push the tag.
+3. Run the `Release` workflow on `main` from the Actions tab and pick the
+   bump (`patch` by default, `minor` or `major`) that gives `vX.Y.Z`, or tag
+   that commit `vX.Y.Z` and push the tag.
 
 The `Release` workflow checks the repository, builds and self-tests every
 image natively on amd64 and arm64 (`.github/workflows/selftest.yml`, the same
