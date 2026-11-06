@@ -10,7 +10,7 @@ import (
 	"regexp"
 )
 
-// Fixture is the part of schemas/fixture.schema.json the adapter uses. The
+// Fixture is the part of fixtures/schema/ieee20305-fixture.schema.json the adapter uses. The
 // repository validates fixtures against the schema; the adapter checks what
 // it relies on and exits 4 on a violation.
 type Fixture struct {

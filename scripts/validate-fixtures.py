@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validates every fixture: the schema, then the rules a schema cannot say.
 
-Usage: check_fixtures.py [fixtures directory]   (default: fixtures)
+Usage: validate-fixtures.py [fixtures directory]   (default: fixtures)
 """
 
 import json
@@ -90,7 +90,7 @@ CURVE_MODES = {"opModFreqWatt": 0, "opModVoltVar": 11, "opModVoltWatt": 12, "opM
 
 def main() -> int:
     directory = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "fixtures"
-    schema = json.loads((ROOT / "schemas" / "fixture.schema.json").read_text())
+    schema = json.loads((ROOT / "fixtures" / "schema" / "ieee20305-fixture.schema.json").read_text())
     jsonschema.Draft202012Validator.check_schema(schema)
     validator = jsonschema.Draft202012Validator(schema)
     failed = False

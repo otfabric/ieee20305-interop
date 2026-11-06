@@ -18,6 +18,15 @@ against real implementation diversity without owning any of it.
 | `py20305` | [DER Security py20305](https://github.com/DERSecurity/py20305) | Python | client | Apache-2.0 | implemented ([README](adapters/py20305/README.md)) |
 | `gridappsd` | [GridAPPS-D server](https://github.com/GRIDAPPSD/ieee-2030_5-server-go) and [client](https://github.com/GRIDAPPSD/ieee-2030_5-client-go) | Go | both | Battelle BSD | implemented ([README](adapters/gridappsd/README.md)) |
 
+## OT Fabric's own stack
+
+`ghcr.io/otfabric/ieee20305-interop-otfabric` is go-ieee20305 behind the same
+contract, so you can test your stack against ours the way we test ours against
+yours. Despite the name it shares with the reference images, it is not an
+independent implementation and not part of a release of this repository, so
+its tags are go-ieee20305 versions and `manifest.json` does not list it: see
+[own/go-ieee20305/README.md](own/go-ieee20305/README.md).
+
 ## Quick start
 
 ```bash
@@ -43,6 +52,7 @@ none are committed or baked into the images.
 - [docs/CAPABILITIES.md](docs/CAPABILITIES.md) -- what capabilities documents
   describe
 - [docs/FIXTURES.md](docs/FIXTURES.md) -- what fixtures seed and send
+- [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) -- what works between the stacks, and what does not
 - [tests/cases.tsv](tests/cases.tsv) -- the cross-stack test ids
 - [REQUIREMENTS.md](REQUIREMENTS.md) -- what this repository must do
 - [PLAN.md](PLAN.md) -- order of work

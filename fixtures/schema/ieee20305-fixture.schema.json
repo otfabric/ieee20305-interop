@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/otfabric/ieee20305-interop/schemas/fixture.schema.json",
+  "$id": "https://github.com/otfabric/ieee20305-interop/fixtures/schema/ieee20305-fixture.schema.json",
   "title": "ieee20305-interop fixture",
   "description": "What a server is seeded with and what a client sends, for one scenario. Fixture schema 1.1; see docs/FIXTURES.md.",
   "type": "object",

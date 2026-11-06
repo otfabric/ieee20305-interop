@@ -24,7 +24,12 @@ log()  { echo "[$(basename "$0" .sh)] $*" >&2; }
 ok()   { PASS=$((PASS + 1)); [[ -n "${VERBOSE:-}" ]] && log "ok: ${CHECK_PREFIX:-}$*"; return 0; }
 fail() { FAIL=$((FAIL + 1)); log "FAIL: ${CHECK_PREFIX:-}$*"; return 0; }
 
-image_of() { echo "${REGISTRY}/ieee20305-interop-$1:${VERSION}"; }
+# image_of <adapter>: ADAPTER_IMAGE_<adapter> names an image outside the release
+# set, which this repository's scripts know nothing about.
+image_of() {
+    local override="ADAPTER_IMAGE_$1"
+    if [[ -n "${!override:-}" ]]; then echo "${!override}"; else echo "${REGISTRY}/ieee20305-interop-$1:${VERSION}"; fi
+}
 
 require_tools() {
     local t

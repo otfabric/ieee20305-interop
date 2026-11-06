@@ -70,7 +70,9 @@ reports the rest as `SKIP_UNSUPPORTED`.
 
 `upstream` names the implementation the adapter wraps, pinned to a release
 and its commit. When the client role comes from a different repository,
-`upstream.client` pins that one too.
+`upstream.client` pins that one too. `upstream.independentEngine` is `false`
+for OT Fabric's own stack (`own/`, adapter `otfabric`): results against it
+do not count as an independent implementation.
 
 ## TLS
 

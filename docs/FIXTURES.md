@@ -27,9 +27,9 @@ values in the fixture, which they read from the image with `print-fixture`.
 fixtures/<name>/fixture.json
 ```
 
-`make fixtures` ([scripts/check_fixtures.py](../scripts/check_fixtures.py))
+`make fixtures` ([scripts/validate-fixtures.py](../scripts/validate-fixtures.py))
 validates each fixture against
-[schemas/fixture.schema.json](../schemas/fixture.schema.json), then checks:
+[fixtures/schema/ieee20305-fixture.schema.json](../fixtures/schema/ieee20305-fixture.schema.json), then checks:
 
 - the name is the directory name;
 - the PIN has a valid check digit;
