@@ -238,19 +238,13 @@ def capabilities() -> dict[str, Any]:
         "(events/response.py post_der_response, subscription/manager.py subscribe).",
         "put-der sends the fixture's der, with its CSIP-AUS doeModesSupported and doeModesEnabled when it has "
         "them, as py20305's csipaus models (models/csipaus/csipaus_ext.py) in py20305's CSIP-AUS mode.",
-        "flow-reservation is unsupported (exit 5): py20305 v0.16.0 has no flow reservation client logic.",
+        "flow-reservation is unsupported (exit 5): py20305 v0.16.2 has no flow reservation client logic.",
         "Messages (MessagingProgram) are not read: no contract operation reads them.",
-        "put-der (2018) fails against Envoy, a known issue: py20305 writes the CSIP-AUS extensions in the namespace "
-        "https://csipaus.org/ns (models/csipaus/csipaus_ext.py:12, xml/serialization.py:39), Envoy reads only "
-        "https://csipaus.org/ns/v1.3 (envoy_schema 2.7.0 server/schema/sep2/base.py:8) and answers the "
-        "DERCapability PUT with 400, doeModesSupported missing (with the v1.3 namespace Envoy accepts all four "
-        "PUTs); GridAPPS-D serves no DERList.",
-        "poll-pricing (2018) fails against Envoy, a known issue: CSIP-AUS 1.3 (csipaus-core-v1.3.xsd) extends "
-        "TimeTariffInterval with a mandatory RateComponentLink in the IEEE 2030.5 namespace, which Envoy serves "
-        "(src/envoy/server/mapper/sep2/pricing.py:373); py20305 does not model it, and its parser, which has no lenient option "
-        "(xml/serialization.py from_xml), rejects the TimeTariffIntervalList "
-        "(discovery.py _discover_rate_component skips it), so no interval is found; GridAPPS-D serves no "
-        "tariffs.",
+        "put-der writes the CSIP-AUS extensions in the namespace the server's DeviceCapability declares "
+        "(https://csipaus.org/ns/v1.3 for Envoy; py20305 v0.16.2, DERSecurity/py20305#80). GridAPPS-D serves no "
+        "DERList.",
+        "poll-pricing reads CSIP-AUS 1.3 TimeTariffIntervals, whose RateComponentLink py20305 models since "
+        "v0.16.2 (models/csipaus/tariff.py, DERSecurity/py20305#80). GridAPPS-D serves no tariffs.",
         "Curves are checked, but not declared: no server of the self-tests serves curves (GridAPPS-D cannot "
         "seed them, Envoy serves none), so no baked fixture has them.",
     ]
