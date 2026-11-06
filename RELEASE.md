@@ -38,6 +38,28 @@ anything is built, when it has none for the tag.
 
 ---
 
+## v0.4.1
+
+**Date:** 2026-11-06
+**Previous release:** v0.4.0
+
+### Changed
+
+- `py20305` on v0.16.2 (was v0.16.0), commit
+  `9b6e75c7f9f03a110c73c574f6072bf0320a0f3a`. Its new dependency `yarl` is in
+  `requirements.in`; the lock is otherwise unchanged.
+
+### Fixed
+
+- py20305 v0.16.2 fixes the two py20305 entries of `tests/known-bugs.tsv`,
+  which are removed ([DERSecurity/py20305#80](https://github.com/DERSecurity/py20305/pull/80)):
+  `py20305-csipaus-namespace` (`put-der` against Envoy) and
+  `py20305-no-rate-component-link` (`poll-pricing` of `csip-aus`). py20305
+  now passes every operation it declares against Envoy and OT Fabric's own
+  server.
+
+---
+
 ## v0.4.0
 
 **Date:** 2026-11-06

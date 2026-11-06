@@ -3,7 +3,7 @@
 # The Dockerfiles are the source of truth for a build:
 # scripts/check-versions.sh fails when this file disagrees with them.
 
-interop_version: "0.4.0"
+interop_version: "0.4.1"
 contract_version: "0.3"        # docs/CONTAINER_CONTRACT.md (draft until 1.0); documents carry schemaVersion "1.0"
 fixture_schema: "1.1"          # fixtures/schema/ieee20305-fixture.schema.json
 
@@ -87,8 +87,8 @@ implementations:
     status: implemented
     upstream: "DER Security py20305 / Project Satori"
     repository: "https://github.com/DERSecurity/py20305"
-    version: "v0.16.0"
-    revision: "79844938eea3d05f5432cdc5f2d07a103e87912b"
+    version: "v0.16.2"
+    revision: "9b6e75c7f9f03a110c73c574f6072bf0320a0f3a"
     base_images:
       PYTHON_DIGEST: "sha256:57b29a7c050c4e679e4bea572e14b3965cf4b5839de2da49d55e49ffc4024f39"   # python:3.13-slim-trixie
     dependency_lock: "adapters/py20305/requirements.txt"
@@ -105,11 +105,10 @@ implementations:
       registration, Sep2Client for every request, its models for what it sends,
       and its NotificationServer for subscribe. It verifies the server's host
       name. flow-reservation is unsupported (py20305 has no client logic for
-      it). Against Envoy, put-der fails because py20305 writes the CSIP-AUS
-      extensions in https://csipaus.org/ns rather than /ns/v1.3, and
-      poll-pricing because py20305 does not model the RateComponentLink that
-      CSIP-AUS 1.3 requires in a TimeTariffInterval; both are in
-      tests/known-bugs.tsv. No lock file
+      it). Since v0.16.2 (DERSecurity/py20305#80) it writes the CSIP-AUS
+      extensions in the namespace the server declares, and models the
+      RateComponentLink that CSIP-AUS 1.3 requires in a TimeTariffInterval,
+      so put-der and poll-pricing pass against Envoy. No lock file
       upstream, so the lock is this repository's.
 
   gridappsd:

@@ -141,9 +141,8 @@ What is not declared, and why (each adapter's `notes` give the evidence):
   EPRI's client has them commented out.
 - **Curves**: sep2server takes curves from its boot fixture only and does not
   serve `/dc/{id}`; Envoy serves none. No baked fixture has curves.
-- **Pricing** is seeded and served by Envoy, but no client of the self-tests
-  reads it (py20305 refuses Envoy's TimeTariffIntervalList, a known issue;
-  the GridAPPS-D client has no pricing types). **Messaging** cannot be
+- **Pricing** is seeded and served by Envoy, and read by py20305 (the
+  GridAPPS-D client has no pricing types). **Messaging** cannot be
   seeded into any server adapter.
 - **put-der** is served by Envoy only: sep2server's EndDevice has no
   DERListLink.

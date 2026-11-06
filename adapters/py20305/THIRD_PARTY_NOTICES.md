@@ -7,7 +7,7 @@ software, each under its own licence.
 ## py20305
 
 - Upstream: https://github.com/DERSecurity/py20305 (DER Security Corp)
-- Version: v0.16.0, commit 79844938eea3d05f5432cdc5f2d07a103e87912b
+- Version: v0.16.2, commit 9b6e75c7f9f03a110c73c574f6072bf0320a0f3a
 - Licence: Apache-2.0, with a NOTICE file:
   `/licenses/github.com/DERSecurity/py20305/`
 - Installed from that source, unmodified, in `/opt/venv`. The package

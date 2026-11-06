@@ -1,8 +1,8 @@
 # py20305 adapter
 
 Wraps [py20305](https://github.com/DERSecurity/py20305) (DER Security,
-Project Satori), an async Python IEEE 2030.5 / CSIP client, pinned to v0.16.0
-(`79844938…`) under Apache-2.0. See
+Project Satori), an async Python IEEE 2030.5 / CSIP client, pinned to v0.16.2
+(`9b6e75c7…`) under Apache-2.0. See
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The pins are in the
 [Dockerfile](Dockerfile) and [versions.yaml](../../versions.yaml).
 
@@ -64,14 +64,11 @@ on stderr.
   name the host in `--url`. (The GridAPPS-D client checks only the chain.)
 - `flow-reservation` is unsupported (exit 5): py20305 has no flow reservation
   client logic. `client run` and `call` are not implemented (exit 5).
-- `put-der` and `poll-pricing` are declared for 2018 and fail against Envoy,
-  as recorded in [tests/known-bugs.tsv](../../tests/known-bugs.tsv). py20305
-  writes the CSIP-AUS extensions in the namespace `https://csipaus.org/ns`,
-  but Envoy expects `https://csipaus.org/ns/v1.3` and refuses the
-  DERCapability PUT; with the v1.3 namespace Envoy accepts all four PUTs.
-  CSIP-AUS 1.3 (`csipaus-core-v1.3.xsd`) requires a `RateComponentLink` in
-  each TimeTariffInterval, which Envoy serves; py20305 does not model it, and
-  its parser, which has no lenient mode, rejects them.
-  GridAPPS-D serves neither a DERList nor tariffs.
+- `put-der` and `poll-pricing` are declared for 2018. Since v0.16.2
+  ([DERSecurity/py20305#80](https://github.com/DERSecurity/py20305/pull/80))
+  py20305 writes the CSIP-AUS extensions in the namespace the server
+  declares (`https://csipaus.org/ns/v1.3` for Envoy), and models the
+  `RateComponentLink` that CSIP-AUS 1.3 (`csipaus-core-v1.3.xsd`) requires in
+  each TimeTariffInterval. GridAPPS-D serves neither a DERList nor tariffs.
 - Curves are checked, but no server of the self-tests serves them, so no
   baked fixture has them and the `curves` feature is not declared.
