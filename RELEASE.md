@@ -48,6 +48,18 @@ anything is built, when it has none for the tag.
 - `py20305` on v0.16.2 (was v0.16.0), commit
   `9b6e75c7f9f03a110c73c574f6072bf0320a0f3a`. Its new dependency `yarl` is in
   `requirements.in`; the lock is otherwise unchanged.
+- `gridappsd` server on v0.19.0 (was v0.18.0), commit
+  `a710b7a930e01a62401c7bd4d542f0b0ca9fb54d`. v0.19.0 still never sets
+  `EndDevice.SubscriptionListLink`, so `patches/0001` stays, rebased onto the
+  new shared EndDevice link decorator (`logEventLinks` in
+  `pkg/store/memory/logeventbinding.go`); what it does is unchanged. The
+  GridAPPS-D client stays on v0.1.0, its latest release.
+- Base images: `debian:trixie-slim` on
+  `sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2`
+  and `python:3.13-slim-trixie` on
+  `sha256:09a17cad02668ae61ece136b4fd36ac3849e14f670ebedb637ea3e15580525bc`.
+  Every upstream is now on its latest release (EPRI v0.2.11 and Envoy v2.5.0
+  already were).
 
 ### Fixed
 

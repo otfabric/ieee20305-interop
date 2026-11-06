@@ -18,7 +18,7 @@ below, and the cases it explains count as known issues instead of failures.
 | `epri` | [EPRI IEEE 2030.5 Client](https://github.com/epri-dev/IEEE-2030.5-Client) | v0.2.11 | commit `505ee47d9c3ed43ce63087198d09f77338da627d`, one patch | independent, C |
 | `envoy` | [ANU Envoy](https://github.com/bsgip/envoy) | v2.5.0 | commit `9d00340b5592f1fdf09dc74bd743fc251da0bfb5`, dependencies from its `uv.lock` | independent, Python |
 | `py20305` | [DER Security py20305](https://github.com/DERSecurity/py20305) | v0.16.2 | commit `9b6e75c7f9f03a110c73c574f6072bf0320a0f3a`, hashed lock of this repository | independent, Python |
-| `gridappsd` | [GridAPPS-D server](https://github.com/GRIDAPPSD/ieee-2030_5-server-go) | v0.18.0 | commit `d7a4a17042af7506610a973c6be8a5466db34053`, one patch | independent, Go |
+| `gridappsd` | [GridAPPS-D server](https://github.com/GRIDAPPSD/ieee-2030_5-server-go) | v0.19.0 | commit `a710b7a930e01a62401c7bd4d542f0b0ca9fb54d`, one patch | independent, Go |
 | | [GridAPPS-D client](https://github.com/GRIDAPPSD/ieee-2030_5-client-go) | v0.1.0 | commit `66570b94ea104b46eb12b48ef2451b3454050176` | |
 
 The pins live in the Dockerfiles and are mirrored in

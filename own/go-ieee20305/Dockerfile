@@ -17,7 +17,7 @@ ARG BASE_REGISTRY=docker.io/library
 # golang:1.26.8-trixie and debian:trixie-slim, multi-arch indexes
 # (linux/amd64 and linux/arm64): the digests of versions.yaml.
 ARG GOLANG_DIGEST=sha256:aae9c439b447d24c93ee483408992857cf39a3fb6ab7fe53affc65d834891fa8
-ARG DEBIAN_DIGEST=sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
+ARG DEBIAN_DIGEST=sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 
 FROM ${BASE_REGISTRY}/golang:1.26.8-trixie@${GOLANG_DIGEST} AS build
 
