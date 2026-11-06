@@ -23,7 +23,7 @@ implementations:
     version: "v0.2.11"
     revision: "505ee47d9c3ed43ce63087198d09f77338da627d"
     base_images:
-      DEBIAN_DIGEST: "sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad"   # debian:trixie-slim
+      DEBIAN_DIGEST: "sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2"   # debian:trixie-slim
     debian_packages:
       GCC_VERSION: "4:14.2.0-1"
       OPENSSL_VERSION: "3.5.7-1~deb13u3"
@@ -56,7 +56,7 @@ implementations:
     version: "v2.5.0"
     revision: "9d00340b5592f1fdf09dc74bd743fc251da0bfb5"
     base_images:
-      PYTHON_DIGEST: "sha256:57b29a7c050c4e679e4bea572e14b3965cf4b5839de2da49d55e49ffc4024f39"   # python:3.13-slim-trixie
+      PYTHON_DIGEST: "sha256:09a17cad02668ae61ece136b4fd36ac3849e14f670ebedb637ea3e15580525bc"   # python:3.13-slim-trixie
     debian_packages:
       HAPROXY_VERSION: "3.0.11-1+deb13u4"
       POSTGRESQL_VERSION: "17.11-0+deb13u1"
@@ -90,7 +90,7 @@ implementations:
     version: "v0.16.2"
     revision: "9b6e75c7f9f03a110c73c574f6072bf0320a0f3a"
     base_images:
-      PYTHON_DIGEST: "sha256:57b29a7c050c4e679e4bea572e14b3965cf4b5839de2da49d55e49ffc4024f39"   # python:3.13-slim-trixie
+      PYTHON_DIGEST: "sha256:09a17cad02668ae61ece136b4fd36ac3849e14f670ebedb637ea3e15580525bc"   # python:3.13-slim-trixie
     dependency_lock: "adapters/py20305/requirements.txt"
     license: "Apache-2.0"
     language: "Python"
@@ -116,15 +116,15 @@ implementations:
     status: implemented
     upstream: "GridAPPS-D IEEE 2030.5 server and client (PNNL)"
     repository: "https://github.com/GRIDAPPSD/ieee-2030_5-server-go"
-    version: "v0.18.0"
-    revision: "d7a4a17042af7506610a973c6be8a5466db34053"
+    version: "v0.19.0"
+    revision: "a710b7a930e01a62401c7bd4d542f0b0ca9fb54d"
     client:
       repository: "https://github.com/GRIDAPPSD/ieee-2030_5-client-go"
       version: "v0.1.0"
       revision: "66570b94ea104b46eb12b48ef2451b3454050176"
     base_images:
       GOLANG_DIGEST: "sha256:aae9c439b447d24c93ee483408992857cf39a3fb6ab7fe53affc65d834891fa8"   # golang:1.26.8-trixie
-      DEBIAN_DIGEST: "sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad"   # debian:trixie-slim
+      DEBIAN_DIGEST: "sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2"   # debian:trixie-slim
     license: "LicenseRef-Battelle-BSD"
     language: "Go"
     independent_engine: true
@@ -164,7 +164,7 @@ own_implementations:
     tls_cipher_suites: ["TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8", "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"]
     base_images:
       GOLANG_DIGEST: "sha256:aae9c439b447d24c93ee483408992857cf39a3fb6ab7fe53affc65d834891fa8"   # golang:1.26.8-trixie
-      DEBIAN_DIGEST: "sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad"   # debian:trixie-slim
+      DEBIAN_DIGEST: "sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2"   # debian:trixie-slim
     image: "ghcr.io/otfabric/ieee20305-interop-otfabric"
     build: "own/go-ieee20305"
 

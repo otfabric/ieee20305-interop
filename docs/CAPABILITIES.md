@@ -36,8 +36,8 @@ reports the rest as `SKIP_UNSUPPORTED`.
   "upstream": {
     "name": "GridAPPS-D IEEE 2030.5 server and client",
     "repository": "https://github.com/GRIDAPPSD/ieee-2030_5-server-go",
-    "version": "v0.18.0",
-    "revision": "d7a4a17042af7506610a973c6be8a5466db34053",
+    "version": "v0.19.0",
+    "revision": "a710b7a930e01a62401c7bd4d542f0b0ca9fb54d",
     "license": "LicenseRef-Battelle-BSD",
     "language": "Go",
     "independentEngine": true,

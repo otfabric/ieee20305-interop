@@ -11,7 +11,7 @@
 # Docker Hub serves exactly the same image.
 ARG BASE_REGISTRY=docker.io/library
 # python:3.13-slim-trixie, multi-arch index (linux/amd64 and linux/arm64).
-ARG PYTHON_DIGEST=sha256:57b29a7c050c4e679e4bea572e14b3965cf4b5839de2da49d55e49ffc4024f39
+ARG PYTHON_DIGEST=sha256:09a17cad02668ae61ece136b4fd36ac3849e14f670ebedb637ea3e15580525bc
 
 FROM ${BASE_REGISTRY}/python:3.13-slim-trixie@${PYTHON_DIGEST} AS build
 

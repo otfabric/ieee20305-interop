@@ -4,7 +4,7 @@ Wraps the GridAPPS-D IEEE 2030.5 implementations, both written in Go:
 
 | Role | Upstream | Pin |
 |------|----------|-----|
-| server | [ieee-2030_5-server-go](https://github.com/GRIDAPPSD/ieee-2030_5-server-go) (`sep2server`) | v0.18.0, `d7a4a170…` |
+| server | [ieee-2030_5-server-go](https://github.com/GRIDAPPSD/ieee-2030_5-server-go) (`sep2server`) | v0.19.0, `a710b7a9…` |
 | client | [ieee-2030_5-client-go](https://github.com/GRIDAPPSD/ieee-2030_5-client-go) | v0.1.0, `66570b94…` |
 
 Both are under the Battelle BSD licence (`LicenseRef-Battelle-BSD`); see
@@ -59,7 +59,7 @@ the named program of each device (or of `--device`), and sep2server
 notifies the subscribers of the program's lists.
 
 **Patch.** [patches/0001](patches/0001-EndDevice-advertise-the-SubscriptionListLink.patch)
-makes sep2server advertise the `SubscriptionListLink` of each EndDevice: v0.18.0
+makes sep2server advertise the `SubscriptionListLink` of each EndDevice: v0.19.0
 mounts `GET`/`POST /edev/{id}/sub` but never links to it. The Dockerfile
 applies every patch of `patches/` after the pin check.
 

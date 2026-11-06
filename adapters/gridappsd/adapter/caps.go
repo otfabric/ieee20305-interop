@@ -12,7 +12,7 @@ var (
 )
 
 const (
-	serverTree = "https://github.com/GRIDAPPSD/ieee-2030_5-server-go/blob/d7a4a17042af7506610a973c6be8a5466db34053/"
+	serverTree = "https://github.com/GRIDAPPSD/ieee-2030_5-server-go/blob/a710b7a930e01a62401c7bd4d542f0b0ca9fb54d/"
 	clientTree = "https://github.com/GRIDAPPSD/ieee-2030_5-client-go/blob/66570b94ea104b46eb12b48ef2451b3454050176/"
 	coreTree   = "https://github.com/GRIDAPPSD/ieee-2030_5-core-go/blob/v0.27.0/"
 )
@@ -20,7 +20,7 @@ const (
 var capabilityNotes = []string{
 	"TLS: TLS 1.2 with TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8 only, in both roles, through the GridAPPS-D fork of crypto/tls; a peer that does not offer CCM_8 cannot connect.",
 	"Server: devices are provisioned by LFDI from the certificates of --tls-dir/devices; each gets one FunctionSetAssignments, under which the admin API creates the fixture's programs (description, primacy, mRID), default controls and controls. The server picks the hrefs and the controls' mRIDs.",
-	"Server: patched (adapters/gridappsd/patches/0001): v0.18.0 mounts GET and POST /edev/{id}/sub but never sets EndDevice.SubscriptionListLink, so no client could find where to subscribe (" + serverTree + "pkg/sep2srv/assembly/assembly.go#L830, " + serverTree + "pkg/store/memory/logeventbinding.go#L113).",
+	"Server: patched (adapters/gridappsd/patches/0001): v0.19.0 mounts GET and POST /edev/{id}/sub but never sets EndDevice.SubscriptionListLink, so no client could find where to subscribe (" + serverTree + "pkg/sep2srv/assembly/assembly.go#L933, " + serverTree + "pkg/store/memory/logeventbinding.go#L81).",
 	"Server: a fixture with curves is refused (exit 5): sep2server stores curves only from its boot fixture and mounts only GET /dc, so a control's curve link /dc/{id} is not served (" + serverTree + "pkg/sep2srv/assembly/assembly.go#L1049, " + serverTree + "internal/dercontrol/dercurve/dercurve.go#L21), and an admin-created program has no DERCurveListLink.",
 	"Server: the fixture csip-aus is refused (exit 5): the admin control catalog has no CSIP-AUS limits (" + serverTree + "internal/dercontrol/catalog.go#L22). Tariffs and messages are refused too: there is no pricing function set and no admin route to seed MessagingPrograms.",
 	"Server: a program without a defaultControl is created with one and then cleared (the admin API requires it at creation, " + serverTree + "internal/handler/admin_derprogram.go#L229). A DefaultDERControl is served without the fixture's description: the admin API takes none.",
