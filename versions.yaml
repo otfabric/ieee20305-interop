@@ -3,9 +3,9 @@
 # The Dockerfiles are the source of truth for a build:
 # scripts/check-versions.sh fails when this file disagrees with them.
 
-interop_version: "0.3.1"
+interop_version: "0.4.0"
 contract_version: "0.3"        # docs/CONTAINER_CONTRACT.md (draft until 1.0); documents carry schemaVersion "1.0"
-fixture_schema: "1.1"          # schemas/fixture.schema.json
+fixture_schema: "1.1"          # fixtures/schema/ieee20305-fixture.schema.json
 
 protocol:
   name: "IEEE 2030.5"
@@ -148,6 +148,27 @@ implementations:
       notification listener is CCM_8-only and requires a client certificate,
       which sep2server's delivery has neither of. Both roles use the GridAPPS-D
       fork of crypto/tls and offer only the CCM_8 cipher suite.
+# OT Fabric's own stack (own/go-ieee20305/README.md): not an independent
+# implementation, not pinned, not in a release or manifest.json. Built by hand
+# with the workflow "Own stack (go-ieee20305)" from the latest release.
+own_implementations:
+  otfabric:
+    upstream: "go-ieee20305"
+    repository: "https://github.com/otfabric/go-ieee20305"
+    artifact: "go:github.com/otfabric/go-ieee20305"
+    version: "latest release, resolved when the image is built by hand"
+    license: "MIT"
+    language: "Go"
+    independent_engine: false
+    roles: [server, client]
+    versions_claimed: ["2018", "2023"]
+    tls_cipher_suites: ["TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8", "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"]
+    base_images:
+      GOLANG_DIGEST: "sha256:aae9c439b447d24c93ee483408992857cf39a3fb6ab7fe53affc65d834891fa8"   # golang:1.26.8-trixie
+      DEBIAN_DIGEST: "sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad"   # debian:trixie-slim
+    image: "ghcr.io/otfabric/ieee20305-interop-otfabric"
+    build: "own/go-ieee20305"
+
 images:
   epri: "ghcr.io/otfabric/ieee20305-interop-epri"
   envoy: "ghcr.io/otfabric/ieee20305-interop-envoy"

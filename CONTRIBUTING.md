@@ -4,7 +4,7 @@
 
 1. **Nothing here may know a library under test** (REQUIREMENTS.md R1). CI
    fails on references to one in adapters, fixtures, schemas, scripts or
-   tests.
+   tests. `own/` is the one exception.
 2. **The contract is the product.** Change
    [docs/CONTAINER_CONTRACT.md](docs/CONTAINER_CONTRACT.md) first, then every
    adapter. After 1.0, an addition bumps the minor version and a breaking

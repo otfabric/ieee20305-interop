@@ -1,0 +1,8 @@
+github.com/otfabric/go-ieee20305 v0.6.0 h1:bkYm6T7efFH9EhHLg/ShiSiD73kKm/j5aR+iwIdh5QE=
+github.com/otfabric/go-ieee20305 v0.6.0/go.mod h1:K1GtsiUzTS8FDvtOlf1xSBEToxEVqXbY/pvvWR6zifU=
+github.com/otfabric/go-ieee20305/tlsccm v0.3.0 h1:NgKdaqttv/J5NH1dD7MgNJMbIhzqxdwxnMbfkizyxkw=
+github.com/otfabric/go-ieee20305/tlsccm v0.3.0/go.mod h1:F5tBPhNg+k2l0ACUVIGp1nivuVN5mE41GgxSVbpT9BA=
+golang.org/x/crypto v0.57.0 h1:3ZVCjf8Ggz7zneR/EHRVx68Ctf+2pmIMP2UFhh9cC6M=
+golang.org/x/crypto v0.57.0/go.mod h1:Fdz0i5U6CoizGwLda9DttjSk6qlZo25zYNtR+ycvuZA=
+golang.org/x/sys v0.48.0 h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo=
+golang.org/x/sys v0.48.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=

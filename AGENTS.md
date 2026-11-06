@@ -2,7 +2,7 @@
 
 ## What this is
 
-Independent IEEE 2030.5 implementations (EPRI, envoy, GridAPPS-D, py20305) in containers behind one command-line contract, with deterministic fixtures, used as oracles by go-ieee20305 and ieee20305ctl. Nothing here depends on go-ieee20305. Profile: **interoperability**.
+Independent IEEE 2030.5 implementations (EPRI, envoy, GridAPPS-D, py20305) in containers behind one command-line contract, with deterministic fixtures, used as oracles by go-ieee20305 and ieee20305ctl. Nothing here depends on go-ieee20305, except `own/`, the one image of OT Fabric's own stack (`own/go-ieee20305/README.md`). Profile: **interoperability**.
 
 ## Organisation standards
 
@@ -17,6 +17,7 @@ This repository follows **otfabric/engineering policy 1.2**, profile **interoper
 | Pins (upstream revision, source hash, base image digests) | versions.yaml, checked by `make validate` |
 | Fixtures | fixtures/, docs/FIXTURES.md |
 | Expected deviations of the stacks | tests/known-bugs.tsv |
+| Results | docs/COMPATIBILITY.md |
 | What this repository must and must not do | REQUIREMENTS.md |
 | What is done and what is next | PLAN.md |
 

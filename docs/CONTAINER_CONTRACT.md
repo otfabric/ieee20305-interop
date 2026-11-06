@@ -39,7 +39,7 @@ compatible line and changes only with the major version.
 
 | Item | Value |
 |------|-------|
-| Image | `ghcr.io/otfabric/ieee20305-interop-<adapter>` |
+| Image | `ghcr.io/otfabric/ieee20305-interop-<adapter>`; OT Fabric's own stack is the adapter `otfabric` |
 | Entrypoint | `ieee20305-interop` (`/usr/local/bin/ieee20305-interop`) |
 | Default command | `server` |
 | Protocol | IEEE 2030.5 over HTTPS with mutual TLS, TLS 1.2 |

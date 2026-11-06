@@ -64,26 +64,26 @@ versions: ## Check that versions.yaml agrees with the Dockerfiles, and that RELE
 	@scripts/check-versions.sh
 	@scripts/release-notes.sh > /dev/null && echo "ok   RELEASE.md has the notes of interop_version"
 
-schemas: ## Check that every JSON schema is a valid draft 2020-12 schema
+schemas: ## Check that every JSON schema (schemas/, fixtures/schema/) is a valid draft 2020-12 schema
 	@echo "Checking schemas..."
 	@if $(PYTHON) -c 'import jsonschema' 2>/dev/null; then \
-		$(PYTHON) -c "import json, jsonschema, pathlib; \
-			[jsonschema.Draft202012Validator.check_schema(json.loads(p.read_text())) for p in pathlib.Path('schemas').glob('*.json')]"; \
+		$(PYTHON) -c "import json, jsonschema, glob; \
+			[jsonschema.Draft202012Validator.check_schema(json.load(open(p))) for p in glob.glob('schemas/*.json') + glob.glob('fixtures/schema/*.json')]"; \
 	else \
 		echo "(jsonschema not installed locally: running in a container)"; \
 		$(RETRY) docker run --rm -v "$$(pwd):/work:ro" -w /work $(TOOLS_REGISTRY)/library/python:3.12-slim \
-			sh -c 'pip install -q --root-user-action=ignore jsonschema && python -c "import json, jsonschema, pathlib; \
-			[jsonschema.Draft202012Validator.check_schema(json.loads(p.read_text())) for p in pathlib.Path(\"schemas\").glob(\"*.json\")]"'; \
+			sh -c 'pip install -q --root-user-action=ignore jsonschema && python -c "import json, jsonschema, glob; \
+			[jsonschema.Draft202012Validator.check_schema(json.load(open(p))) for p in glob.glob(\"schemas/*.json\") + glob.glob(\"fixtures/schema/*.json\")]"'; \
 	fi
 
 fixtures: ## Validate every fixture against the schema and the cross-field rules
 	@echo "Validating fixtures..."
 	@if $(PYTHON) -c 'import jsonschema' 2>/dev/null; then \
-		$(PYTHON) scripts/check_fixtures.py; \
+		$(PYTHON) scripts/validate-fixtures.py; \
 	else \
 		echo "(jsonschema not installed locally: running in a container)"; \
 		$(RETRY) docker run --rm -v "$$(pwd):/work:ro" -w /work $(TOOLS_REGISTRY)/library/python:3.12-slim \
-			sh -c 'pip install -q --root-user-action=ignore jsonschema && python scripts/check_fixtures.py'; \
+			sh -c 'pip install -q --root-user-action=ignore jsonschema && python scripts/validate-fixtures.py'; \
 	fi
 
 lint: ## Shellcheck the scripts
@@ -94,10 +94,16 @@ lint: ## Shellcheck the scripts
 	fi
 	@echo "lint ok"
 
-documents: ## Run the self-tests and validate documents against schemas/
+documents: ## Run the self-tests keeping every document, and validate them against schemas/
 	@rm -rf reports && mkdir -p reports
 	@REPORT_DIR=reports $(MAKE) --no-print-directory smoke interop
-	@echo "Documents generated in reports/"
+	@echo "Validating documents..."
+	@if $(PYTHON) -c 'import jsonschema' 2>/dev/null; then \
+		$(PYTHON) scripts/validate-documents.py reports; \
+	else \
+		$(RETRY) docker run --rm -v "$$(pwd):/work:ro" -w /work $(TOOLS_REGISTRY)/library/python:3.12-slim \
+			sh -c 'pip install -q --root-user-action=ignore jsonschema && python scripts/validate-documents.py reports'; \
+	fi
 
 # ── Local single-arch images (loaded into Docker; used by smoke and interop) ──
 

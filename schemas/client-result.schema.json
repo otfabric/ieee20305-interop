@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/otfabric/ieee20305-interop/schemas/client-result.schema.json",
+  "title": "ieee20305-interop result document",
+  "description": "The single line a 'client <operation>' or a 'call <operation>' prints. See docs/CONTAINER_CONTRACT.md#result-document. response.body is adapter-specific.",
+  "type": "object",
+  "required": ["schemaVersion", "adapter", "operation", "ok", "error", "request", "response", "elapsedMs"],
+  "properties": {
+    "schemaVersion": {"const": "1.0"},
+    "adapter": {"type": "string", "pattern": "^[a-z0-9]+$"},
+    "version": {"enum": ["2018", "2023"], "description": "The IEEE 2030.5 edition: client operations only."},
+    "operation": {
+      "enum": ["register", "discover", "poll-controls", "report", "subscribe", "respond", "log-event", "put-der",
+               "flow-reservation", "poll-pricing", "issue-control"]
+    },
+    "ok": {"type": "boolean"},
+    "error": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["code", "detail"],
+          "properties": {
+            "code": {"enum": ["connect-failed", "timeout", "server-error", "invalid-request", "unsupported", "not-connected"]},
+            "detail": {"type": "string"}
+          }
+        }
+      ]
+    },
+    "request": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "required": ["method", "path"],
+          "properties": {
+            "method": {"enum": ["GET", "POST", "PUT", "DELETE", "HEAD"]},
+            "path": {"type": "string"}
+          }
+        }
+      ]
+    },
+    "response": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "properties": {
+            "status": {"type": "integer", "minimum": 100, "maximum": 599},
+            "body": {}
+          }
+        }
+      ]
+    },
+    "elapsedMs": {"type": "number", "minimum": 0}
+  },
+  "allOf": [
+    {"if": {"properties": {"ok": {"const": true}}}, "then": {"properties": {"error": {"type": "null"}}},
+     "else": {"properties": {"error": {"type": "object"}}}}
+  ]
+}

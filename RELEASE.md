@@ -24,6 +24,9 @@ them into a multi-arch index on GHCR, and creates the GitHub release with
 Consumers pin the digests. Every adapter with a Dockerfile must be in the
 Makefile's `ADAPTERS`, or the release fails.
 
+The `ieee20305-interop-otfabric` image is not part of these releases. It has
+its own manual workflow and no releases (`own/go-ieee20305/README.md`).
+
 The notes are the body of the GitHub release, followed by the image digests:
 everything after the heading `## vX.Y.Z` up to the next line that is exactly
 `---` (`scripts/release-notes.sh vX.Y.Z` prints it). This is the format of
@@ -32,6 +35,42 @@ one section per version, newest first, each ending with a `---` line, and no
 `---` line inside a section. `make validate` (and CI) fails when RELEASE.md
 has no notes for `interop_version`; the `Release` workflow fails, before
 anything is built, when it has none for the tag.
+
+---
+
+## v0.4.0
+
+**Date:** 2026-11-06
+**Previous release:** v0.3.1
+
+### Added
+
+- `own/go-ieee20305` and the manual workflow **Own stack (go-ieee20305)**:
+  OT Fabric's own IEEE 2030.5 stack behind the contract, published as
+  `ghcr.io/otfabric/ieee20305-interop-otfabric` (`:<go-ieee20305 version>`
+  and `:latest`) for others to test against. Server and client, IEEE
+  2030.5-2018 and 2023, every operation, `call issue-control`, the events
+  `device-registered` and `subscription-created`, CCM_8 and AES-128-GCM. Not
+  an independent implementation (`independentEngine: false`), not in this
+  release or `manifest.json`.
+- The scripts take an image through `ADAPTER_IMAGE_<adapter>`, and
+  `results.json` records what an image says of itself (`independent`).
+- `schemas/client-result.schema.json` and `scripts/validate-documents.py`:
+  `make documents` validates the result and capability documents it keeps.
+- `docs/COMPATIBILITY.md`: the pinned upstreams, the cross-stack matrix and
+  the known findings.
+
+### Changed
+
+- Layout of the other harnesses: the fixture schema is
+  `fixtures/schema/ieee20305-fixture.schema.json` (was
+  `schemas/fixture.schema.json`), and `scripts/validate-fixtures.py` checks
+  the fixtures (was `scripts/check_fixtures.py`).
+- `tests/known-bugs.tsv`: `epri-device-category`, the EPRI client rejects
+  the `deviceCategory` of an IEEE 2030.5-2018 EndDevice (seen against OT
+  Fabric's own server, which serves it); `py20305-no-rate-component-link`
+  now applies to every server that serves CSIP-AUS pricing, not only Envoy.
+  The reference images and their pins are unchanged.
 
 ---
 

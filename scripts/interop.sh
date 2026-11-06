@@ -56,6 +56,7 @@ for adapter in "${ADAPTERS[@]}"; do
     docker run --rm "$(image_of "${adapter}")" print-capabilities > "${WORK}/caps-${adapter}.json" 2>/dev/null \
         || { log "${adapter}: print-capabilities failed"; exit 1; }
     log "${adapter}: upstream $(jq -r '.upstream.version' "${WORK}/caps-${adapter}.json")"
+    implementation "${adapter}" "${WORK}/caps-${adapter}.json"
 done
 caps() { cat "${WORK}/caps-$1.json"; }
 declares() { jq -e --arg v "$2" ".versions[\$v] // {} | $3" "${WORK}/caps-$1.json" >/dev/null 2>&1; }
