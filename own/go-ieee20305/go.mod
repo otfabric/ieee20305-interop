@@ -3,7 +3,7 @@ module github.com/otfabric/ieee20305-interop/own/go-ieee20305
 go 1.26.8
 
 require (
-	github.com/otfabric/go-ieee20305 v0.6.0
+	github.com/otfabric/go-ieee20305 v0.7.0
 	github.com/otfabric/go-ieee20305/tlsccm v0.3.0
 )
 
