@@ -7,11 +7,13 @@
 #   make -f own/go-ieee20305/Makefile image
 #
 # The build takes the go-ieee20305 release as UPSTREAM_VERSION (the released
-# git tag, which is the Go module version) and its commit as UPSTREAM_SHA.
-# There is no pin in this repository: the workflow passes the latest release.
+# git tag, which is the Go module version) and its commit as UPSTREAM_SHA, and
+# the release of its CCM_8 module (go-ieee20305/tlsccm, tags tlsccm/vX.Y.Z) as
+# TLSCCM_VERSION (the module version, vX.Y.Z; default: the version go.mod
+# names, which go get keeps unless the release needs a newer one).
+# There is no pin in this repository: the workflow passes the latest releases.
 # A build never uses main. go.mod and go.sum here are only a starting point
-# for local work; the CCM_8 module (go-ieee20305/tlsccm) is the version go.mod
-# names, which go get keeps unless the release needs a newer one.
+# for local work.
 
 ARG BASE_REGISTRY=docker.io/library
 # golang:1.26.8-trixie and debian:trixie-slim, multi-arch indexes
@@ -23,6 +25,7 @@ FROM ${BASE_REGISTRY}/golang:1.26.8-trixie@${GOLANG_DIGEST} AS build
 
 ARG UPSTREAM_VERSION
 ARG UPSTREAM_SHA
+ARG TLSCCM_VERSION=
 ARG ADAPTER_VERSION=dev
 ARG GOPROXY=https://proxy.golang.org
 
@@ -34,9 +37,14 @@ RUN set -eu; \
     test -n "${UPSTREAM_VERSION}" || { echo "UPSTREAM_VERSION is required" >&2; exit 1; }; \
     echo "${UPSTREAM_SHA}" | grep -Eq '^[0-9a-f]{40}$'; \
     go get "github.com/otfabric/go-ieee20305@${UPSTREAM_VERSION}"; \
+    if [ -n "${TLSCCM_VERSION}" ]; then go get "github.com/otfabric/go-ieee20305/tlsccm@${TLSCCM_VERSION}"; fi; \
     go mod tidy; \
     built="$(go list -m -f '{{.Version}}' github.com/otfabric/go-ieee20305)"; \
     test "${built}" = "${UPSTREAM_VERSION}" || { echo "go.mod has go-ieee20305 ${built}, want ${UPSTREAM_VERSION}" >&2; exit 1; }; \
+    if [ -n "${TLSCCM_VERSION}" ]; then \
+        tlsccm="$(go list -m -f '{{.Version}}' github.com/otfabric/go-ieee20305/tlsccm)"; \
+        test "${tlsccm}" = "${TLSCCM_VERSION}" || { echo "go.mod has go-ieee20305/tlsccm ${tlsccm}, want ${TLSCCM_VERSION}" >&2; exit 1; }; \
+    fi; \
     go mod download && go mod verify; \
     origin="$(go mod download -json "github.com/otfabric/go-ieee20305@${UPSTREAM_VERSION}" \
         | sed -nE 's/^[[:space:]]*"Hash": "([0-9a-f]{40})".*/\1/p')"; \
@@ -50,7 +58,7 @@ RUN set -eu; \
 RUN set -eu; \
     test -z "$(gofmt -l .)"; \
     go vet ./...; \
-    go test ./...; \
+    CGO_ENABLED=1 go test -race ./...; \
     go build -trimpath -ldflags "-s -w \
         -X main.adapterVersion=${ADAPTER_VERSION} \
         -X main.upstreamVersion=${UPSTREAM_VERSION} \

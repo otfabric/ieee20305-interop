@@ -60,6 +60,6 @@ test runs, and mount them read-only. See `scripts/lib.sh` for the helpers.
 | Push to a branch | none | nothing; dispatch `ci.yml` to test a branch without a pull request |
 | Push to `main` | `policy.yml` | the light checks; the merged commit was tested as the pull request's merge commit |
 | Schedule | `upstream.yml` | the scheduled runs, on `main` |
-| Release | `release.yml` | the release workflow tests the release commit again |
+| Release | `release.yml` | on the release commit: `make validate`, `scripts/release-check.sh` and the version's notes, then `selftest.yml` (every image built natively on amd64 and arm64, smoke test, cross-stack self-test, documents against `schemas/`); it pushes exactly the tested images and writes `manifest.json` |
 
 Documentation means an added or modified `*.md` file outside `.github/`, `testdata/` and `vendor/`, other than `AGENTS.md` and `CLAUDE.md`. A deleted or renamed document, or any other file, runs everything. `OT Fabric Required Checks` fails unless every job that applies succeeded; its summary lists them.

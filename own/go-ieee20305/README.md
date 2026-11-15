@@ -33,11 +33,11 @@ until docker exec go-ieee20305 test -f /run/ieee20305-interop/ready; do sleep 0.
 published. A rebuild of a version replaces its tag, so pin the digest if you need
 an exact build. The digest is in the summary of the
 [workflow run](https://github.com/otfabric/ieee20305-interop/actions/workflows/own-go-ieee20305.yml),
-and `docker run --rm <image> version` prints the versions.
+and `docker run --rm <image> version` prints the go-ieee20305 version and commit; the summary also names the tlsccm version, which the build checks against the latest `tlsccm/vX.Y.Z` release, and `/licenses/BUNDLED-MODULES.txt` in the image lists every module.
 
 | | |
 |---|---|
-| Upstream | go-ieee20305, the latest release when the image was built, with its `tlsccm` module |
+| Upstream | go-ieee20305, the latest release when the image was built, with the latest release of its `tlsccm` module |
 | Licence | MIT; every module's licence and notice files are in the image under `/licenses` |
 | Adapter name | `otfabric` (the name in documents, as the schema allows) |
 | Language | Go |

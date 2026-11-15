@@ -2,8 +2,14 @@
 # Upstream pins and base image digests are release inputs; nothing floats.
 # The Dockerfiles are the source of truth for a build:
 # scripts/check-versions.sh fails when this file disagrees with them.
+# Upstreams are pinned by git commit (revision), which every build checks
+# after the clone; no source archive hash is recorded. The Python
+# dependencies are pinned by hash in their lock files (dependency_lock).
+# images: lists the published images, one per adapter of the Makefile's
+# ADAPTERS (scripts/check-versions.sh checks both ways); it stands for the
+# per-implementation "published" flag.
 
-interop_version: "0.4.1"
+interop_version: "0.4.2"
 contract_version: "0.3"        # docs/CONTAINER_CONTRACT.md (draft until 1.0); documents carry schemaVersion "1.0"
 fixture_schema: "1.1"          # fixtures/schema/ieee20305-fixture.schema.json
 

@@ -14,6 +14,8 @@ BASE_REGISTRY ?= docker.io/library
 UPSTREAM_VERSION ?= $(shell git ls-remote --tags --refs https://github.com/otfabric/go-ieee20305.git 'v[0-9]*' | sed 's,.*refs/tags/,,' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | sort -V | tail -1)
 # An annotated tag has a peeled line, with the commit.
 UPSTREAM_SHA ?= $(shell r=https://github.com/otfabric/go-ieee20305.git; s=$$(git ls-remote --tags $$r 'refs/tags/$(UPSTREAM_VERSION)^{}' | cut -f1); [ -n "$$s" ] || s=$$(git ls-remote --tags $$r 'refs/tags/$(UPSTREAM_VERSION)' | cut -f1); echo $$s)
+# The latest release of its CCM_8 module (tags tlsccm/vX.Y.Z), as the workflow builds it.
+TLSCCM_VERSION ?= $(shell git ls-remote --tags --refs https://github.com/otfabric/go-ieee20305.git 'tlsccm/v[0-9]*' | sed 's,.*refs/tags/tlsccm/,,' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' | sort -V | tail -1)
 
 export VERSION
 export ADAPTER_IMAGE_otfabric = $(IMAGE)
@@ -21,7 +23,7 @@ export ADAPTER_IMAGE_otfabric = $(IMAGE)
 .PHONY: image smoke interop
 
 image:
-	docker build --build-arg BASE_REGISTRY=$(BASE_REGISTRY) --build-arg UPSTREAM_VERSION=$(UPSTREAM_VERSION) --build-arg UPSTREAM_SHA=$(UPSTREAM_SHA) --build-arg ADAPTER_VERSION=$(UPSTREAM_VERSION) --tag $(IMAGE) --file own/go-ieee20305/Dockerfile .
+	docker build --build-arg BASE_REGISTRY=$(BASE_REGISTRY) --build-arg UPSTREAM_VERSION=$(UPSTREAM_VERSION) --build-arg UPSTREAM_SHA=$(UPSTREAM_SHA) --build-arg TLSCCM_VERSION=$(TLSCCM_VERSION) --build-arg ADAPTER_VERSION=$(UPSTREAM_VERSION) --tag $(IMAGE) --file own/go-ieee20305/Dockerfile .
 
 smoke:
 	scripts/smoke.sh otfabric

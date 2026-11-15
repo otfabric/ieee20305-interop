@@ -72,7 +72,7 @@ schemas: ## Check that every JSON schema (schemas/, fixtures/schema/) is a valid
 	else \
 		echo "(jsonschema not installed locally: running in a container)"; \
 		$(RETRY) docker run --rm -v "$$(pwd):/work:ro" -w /work $(TOOLS_REGISTRY)/library/python:3.12-slim \
-			sh -c 'pip install -q --root-user-action=ignore jsonschema && python -c "import json, jsonschema, glob; \
+			sh -c 'pip install -q --root-user-action=ignore jsonschema==4.26.0 && python -c "import json, jsonschema, glob; \
 			[jsonschema.Draft202012Validator.check_schema(json.load(open(p))) for p in glob.glob(\"schemas/*.json\") + glob.glob(\"fixtures/schema/*.json\")]"'; \
 	fi
 
@@ -83,7 +83,7 @@ fixtures: ## Validate every fixture against the schema and the cross-field rules
 	else \
 		echo "(jsonschema not installed locally: running in a container)"; \
 		$(RETRY) docker run --rm -v "$$(pwd):/work:ro" -w /work $(TOOLS_REGISTRY)/library/python:3.12-slim \
-			sh -c 'pip install -q --root-user-action=ignore jsonschema && python scripts/validate-fixtures.py'; \
+			sh -c 'pip install -q --root-user-action=ignore jsonschema==4.26.0 && python scripts/validate-fixtures.py'; \
 	fi
 
 lint: ## Shellcheck the scripts
@@ -102,7 +102,7 @@ documents: ## Run the self-tests keeping every document, and validate them again
 		$(PYTHON) scripts/validate-documents.py reports; \
 	else \
 		$(RETRY) docker run --rm -v "$$(pwd):/work:ro" -w /work $(TOOLS_REGISTRY)/library/python:3.12-slim \
-			sh -c 'pip install -q --root-user-action=ignore jsonschema && python scripts/validate-documents.py reports'; \
+			sh -c 'pip install -q --root-user-action=ignore jsonschema==4.26.0 && python scripts/validate-documents.py reports'; \
 	fi
 
 # ── Local single-arch images (loaded into Docker; used by smoke and interop) ──

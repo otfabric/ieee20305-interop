@@ -38,6 +38,46 @@ anything is built, when it has none for the tag.
 
 ---
 
+## v0.4.2
+
+**Date:** 2026-11-16
+**Previous release:** v0.4.1
+
+The images are unchanged from v0.4.1: the same upstreams, pins and base
+images.
+
+### Changed
+
+- The self-test validates the documents it keeps against `schemas/`
+  (REQUIREMENTS.md R3.3), in CI and in the Release workflow: the capability
+  document of each image after its smoke test, and every result document of
+  the cross-stack self-test with `results.json`. Before, only `make documents`
+  and the own-stack workflow ran `scripts/validate-documents.py`.
+- `scripts/check-versions.sh` (`make versions`) also fails when versions.yaml's
+  `images:` and the Makefile's `ADAPTERS` do not list the same adapters.
+- versions.yaml's header and AGENTS.md say how the pins work: upstreams by git
+  commit, checked after the clone, with no source archive hash; Python
+  dependencies by hash in their locks; `images:` lists the published images.
+- `ieee20305-interop-otfabric` (OT Fabric's own stack, not in this release or
+  its `manifest.json`): its workflow and `own/go-ieee20305/Makefile` resolve
+  the latest `tlsccm/vX.Y.Z` release as well as the latest go-ieee20305
+  release, the build takes it as `TLSCCM_VERSION` and fails when the module it
+  built differs, and the run summary names it. The build runs the adapter's
+  tests with the race detector.
+- The workflows (CI, Release, the self-test, the own stack) and the Makefile's
+  container fallbacks install `jsonschema==4.26.0`; before, the latest
+  jsonschema.
+- CONTRIBUTING.md's "When CI runs" table says what the Release workflow runs.
+
+### Testing
+
+- `scripts/test_validate_documents.py`: a capability or result document
+  without `schemaVersion`, or with a field of the wrong type, fails
+  `scripts/validate-documents.py`; valid documents pass. Runs with the other
+  script tests (`make unittests`), skipped where jsonschema is not installed.
+
+---
+
 ## v0.4.1
 
 **Date:** 2026-11-06
