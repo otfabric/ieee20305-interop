@@ -121,6 +121,12 @@ jobs:
         run: for f in images/*/image.tar.gz; do docker load --quiet --input "${f}"; done
       - name: Smoke test
         run: REPORT_DIR=reports scripts/smoke.sh "${{ matrix.adapter }}"
+      # REQUIREMENTS.md R3.3: the capability document the smoke test kept
+      # validates against schemas/.
+      - name: Documents against schemas/
+        run: |
+          docker run --rm -v "$PWD:/work:ro" -w /work mirror.gcr.io/library/python:3.12-slim \
+            sh -c 'pip install -q --root-user-action=ignore jsonschema==4.26.0 && python scripts/validate-documents.py reports'
       - name: Collect container logs on failure
         if: failure()
         run: |
@@ -159,10 +165,12 @@ jobs:
         run: for f in images/*/image.tar.gz; do docker load --quiet --input "${f}"; done
       - name: Cross-stack self-test
         run: REPORT_DIR=reports make interop
+      # results.json, and every result document the self-test kept, against
+      # schemas/ (REQUIREMENTS.md R3.3).
       - name: Results (interop-result-v1)
         run: |
           docker run --rm -v "$PWD:/work:ro" -w /work mirror.gcr.io/library/python:3.12-slim \
-            sh -c 'pip install -q --root-user-action=ignore jsonschema && python scripts/interop_result.py reports/results.json'
+            sh -c 'pip install -q --root-user-action=ignore jsonschema==4.26.0 && python scripts/interop_result.py reports/results.json && python scripts/validate-documents.py reports'
       - name: Collect container logs on failure
         if: failure()
         run: |

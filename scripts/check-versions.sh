@@ -6,8 +6,9 @@
 #   ARG UPSTREAM_SHA=...         its commit
 #   ARG <NAME>_DIGEST=sha256:... every base image
 # Each of those values must appear in versions.yaml, every FROM line must be
-# pinned by digest, and every adapter that versions.yaml marks as built or
-# published must have a Dockerfile.
+# pinned by digest, every adapter that versions.yaml marks as built or
+# published must have a Dockerfile, and versions.yaml's images: (the
+# published images) must list exactly the Makefile's ADAPTERS.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
@@ -58,5 +59,31 @@ while read -r adapter state; do
 done < <(awk '/^implementations:/{in_impl=1; next} /^[a-z]/{in_impl=0}
               in_impl && /^  [a-z0-9]+:$/{name=$1; sub(":","",name)}
               in_impl && /^    status:/{print name, $2}' versions.yaml)
+
+# images: in versions.yaml lists the published images: exactly the adapters
+# the Makefile builds, tests and releases (ADAPTERS).
+published=$(awk '/^images:/{in_img=1; next} /^[^ #]/{in_img=0}
+                 in_img && /^  [a-z0-9]+:/{name=$1; sub(":","",name); print name}' versions.yaml | sort)
+adapters=$(sed -nE 's/^ADAPTERS \?= //p' Makefile | tr ' ' '\n' | sed '/^$/d' | sort)
+if [[ -z "${adapters}" ]]; then
+    echo "FAIL the Makefile has no ADAPTERS ?= line"
+    status=1
+fi
+while read -r adapter; do
+    [[ -n "${adapter}" ]] || continue
+    if grep -qxF -- "${adapter}" <<<"${published}"; then
+        echo "ok   ${adapter}: in ADAPTERS and images"
+    else
+        echo "FAIL ${adapter}: in the Makefile's ADAPTERS, but not in versions.yaml images"
+        status=1
+    fi
+done <<<"${adapters}"
+while read -r adapter; do
+    [[ -n "${adapter}" ]] || continue
+    if ! grep -qxF -- "${adapter}" <<<"${adapters}"; then
+        echo "FAIL ${adapter}: in versions.yaml images, but not in the Makefile's ADAPTERS"
+        status=1
+    fi
+done <<<"${published}"
 
 exit "${status}"

@@ -31,6 +31,7 @@ jobs:
     outputs:
       upstream: ${{ steps.version.outputs.upstream }}
       revision: ${{ steps.version.outputs.revision }}
+      tlsccm: ${{ steps.version.outputs.tlsccm }}
       harness: ${{ steps.version.outputs.harness }}
     steps:
       - uses: actions/checkout@v7
@@ -48,12 +49,17 @@ jobs:
           # An annotated tag has a peeled line, with the commit.
           revision=$(git ls-remote --tags https://github.com/otfabric/go-ieee20305.git "refs/tags/${upstream}^{}" | cut -f1)
           [ -n "${revision}" ] || revision=$(git ls-remote --tags https://github.com/otfabric/go-ieee20305.git "refs/tags/${upstream}" | cut -f1)
+          # The CCM_8 module is released separately, as tlsccm/vX.Y.Z.
+          tlsccm=$(git ls-remote --tags --refs https://github.com/otfabric/go-ieee20305.git 'tlsccm/v[0-9]*' \
+            | sed 's,.*refs/tags/tlsccm/,,' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          [ -n "${tlsccm}" ] || { echo "::error::no go-ieee20305/tlsccm release found"; exit 1; }
           harness=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
           [ -n "${harness}" ] || { echo "::error::no harness release found"; exit 1; }
           if [ "${REF}" = "main" ]; then publish="yes: ${IMAGE}:${upstream} and ${IMAGE}:latest"; else publish="no: not run from main"; fi
           {
             echo "upstream=${upstream}"
             echo "revision=${revision}"
+            echo "tlsccm=${tlsccm}"
             echo "harness=${harness}"
           } >> "$GITHUB_OUTPUT"
           {
@@ -63,6 +69,7 @@ jobs:
             echo "|---|---|"
             echo "| go-ieee20305 (latest release) | \`${upstream}\` |"
             echo "| go-ieee20305 commit | \`${revision}\` |"
+            echo "| go-ieee20305/tlsccm (latest release) | \`${tlsccm}\` |"
             echo "| Image tag | \`${upstream}\` |"
             echo "| Reference images (latest harness release) | \`${harness}\` |"
             echo "| This repository | \`${REF}\` at \`${SHA}\` |"
@@ -89,31 +96,37 @@ jobs:
       VERSION: ${{ needs.version.outputs.harness }}
       UPSTREAM: ${{ needs.version.outputs.upstream }}
       REVISION: ${{ needs.version.outputs.revision }}
+      TLSCCM: ${{ needs.version.outputs.tlsccm }}
       ADAPTER_IMAGE_otfabric: ghcr.io/otfabric/ieee20305-interop-otfabric:ci
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - run: pip install jsonschema
+      - run: pip install jsonschema==4.26.0
 
       - name: Build from go-ieee20305 ${{ needs.version.outputs.upstream }}
         run: |
           scripts/retry.sh docker build --progress=plain --build-arg BASE_REGISTRY="${BASE_REGISTRY}" \
             --build-arg UPSTREAM_VERSION="${UPSTREAM}" --build-arg UPSTREAM_SHA="${REVISION}" \
-            --build-arg ADAPTER_VERSION="${UPSTREAM}" \
+            --build-arg TLSCCM_VERSION="${TLSCCM}" --build-arg ADAPTER_VERSION="${UPSTREAM}" \
             --tag "${ADAPTER_IMAGE_otfabric}" --file own/go-ieee20305/Dockerfile .
 
       - name: What was built
         run: |
           reported=$(docker run --rm "${ADAPTER_IMAGE_otfabric}" print-capabilities | jq -r '.upstream.version')
+          # The tlsccm module in the binary (go version -m, kept in the image).
+          tlsccm=$(docker run --rm --entrypoint cat "${ADAPTER_IMAGE_otfabric}" /licenses/BUNDLED-MODULES.txt \
+            | awk '$1 == "github.com/otfabric/go-ieee20305/tlsccm" { print $2 }')
           {
             echo "## ${{ matrix.arch }}"
             echo
             echo "- \`$(docker run --rm "${ADAPTER_IMAGE_otfabric}" version)\`"
             docker run --rm "${ADAPTER_IMAGE_otfabric}" print-capabilities | jq -r '"- upstream \(.upstream.name) \(.upstream.version), commit `\(.upstream.revision)`, independent engine: \(.upstream.independentEngine)"'
+            echo "- go-ieee20305/tlsccm ${tlsccm:-not in the binary}"
           } | tee -a "$GITHUB_STEP_SUMMARY"
           [ "${reported}" = "${UPSTREAM}" ] || { echo "::error::the image reports go-ieee20305 ${reported}, want ${UPSTREAM}"; exit 1; }
+          [ "${tlsccm}" = "${TLSCCM}" ] || { echo "::error::the image has go-ieee20305/tlsccm ${tlsccm:-none}, want ${TLSCCM}"; exit 1; }
 
       # The self-tests are those of the harness release whose reference images
       # they run against: main's scripts may already check what only the next
